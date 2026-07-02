@@ -1,0 +1,79 @@
+# Dependencies
+node_modules
+.wwebjs_auth
+.wwebjs_cache
+config
+.pnpm-store
+
+# Build outputs
+dist
+build
+.next
+out
+
+# Turbo
+.turbo
+
+# Environment variables
+.env
+.env.local
+.env.qa
+.env.prod
+.env.*.local
+!.env.example
+!.env.*.example
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage
+playwright-report
+test-results
+
+# Prisma
+*.db
+*.db-journal
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+venv
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Keys / secrets
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+
+# Claude Code
+.claude/scheduled_tasks.lock
