@@ -63,6 +63,7 @@
     color: var(--text-dim);
     background: var(--surface);
     border: 1px solid var(--border);
+    cursor: pointer;
   }
   .tab.active {
     background: var(--accent-soft);
@@ -96,6 +97,7 @@
     position: relative;
     aspect-ratio: 3/4;
     overflow: hidden;
+    cursor: pointer;
   }
   .image-tile img {
     width: 100%;
@@ -140,7 +142,6 @@
   .image-tile.selected .check::after { content: "✓"; }
   .image-tile.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-  /* Per-image action buttons (delete / animate) */
   .tile-actions {
     position: absolute;
     bottom: 6px;
@@ -166,7 +167,6 @@
   }
   .tile-btn:disabled { opacity: 0.5; }
 
-  /* Selection tray */
   .tray {
     position: fixed;
     bottom: 0;
@@ -220,7 +220,6 @@
     border: none;
   }
 
-  /* Modal for caption/schedule */
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -320,9 +319,9 @@
     background: none;
     border: none;
     margin-top: 8px;
+    cursor: pointer;
   }
 
-  /* Videos tab */
   .video-card {
     display: flex;
     gap: 10px;
@@ -453,7 +452,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     } else if (tab.dataset.view === 'videos') {
       videosView.style.display = 'block';
       loadVideos();
-      // auto-refresh while any job might still be processing
       videoPollTimer = setInterval(loadVideos, 15000);
     } else {
       queueView.style.display = 'block';
@@ -464,10 +462,14 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 // ─── Load categories ────────────────────────────────────
 async function loadCategories() {
-  const res = await fetch('/api/categories');
-  const cats = await res.json();
-  categorySelect.innerHTML = '<option value="">All categories</option>' +
-    cats.map(c => `<option value="${c.category}">${c.category} (${c.image_count})</option>`).join('');
+  try {
+    const res = await fetch('/api/categories');
+    const cats = await res.json();
+    categorySelect.innerHTML = '<option value="">All categories</option>' +
+      cats.map(c => `<option value="${c.category}">${c.category} (${c.image_count})</option>`).join('');
+  } catch (err) {
+    console.error("Error loading categories:", err);
+  }
 }
 
 categorySelect.addEventListener('change', () => {
@@ -477,110 +479,97 @@ categorySelect.addEventListener('change', () => {
 
 async function fetchCombinedMedia(category) {
   const encodedCategory = encodeURIComponent(category);
-  
-  // Use Promise.all to fetch both in parallel
   const [imagesRes, videosRes] = await Promise.all([
     fetch(`/api/images?category=${encodedCategory}`),
     fetch(`/api/videos/grouped?category=${encodedCategory}`)
   ]);
 
-  // Parse the JSON responses
-  const images = await imagesRes.json();
-  const videos = await videosRes.json();
-  console.log(images, videos)
-  // Combine them into a single result object/array
   return {
-    images,
-    videos,
-    combined: [...images, ...videos] // Merged into one array
+    images: await imagesRes.json(),
+    videos: await videosRes.json()
   };
 }
 
 function combineMedia(images, videos) {
   const map = new Map();
 
-  // 1. Process Images
-  images.forEach(img => {
-    if (!map.has(img.product_id)) {
-      map.set(img.product_id, { ...img, images: [], generated_videos: [] });
+  images.forEach(prod => {
+    if (!map.has(prod.product_id)) {
+      map.set(prod.product_id, { ...prod, images: [], generated_videos: [] });
     }
-    map.get(img.product_id).images.push(img);
+    const entry = map.get(prod.product_id);
+    if (prod.images) entry.images.push(...prod.images);
   });
 
-  // 2. Process Videos (Merging into the same objects)
-  videos.forEach(vid => {
-    if (!map.has(vid.product_id)) {
-      // If a video exists without an image record, create the base entry
-      map.set(vid.product_id, { ...vid, images: [], generated_videos: [] });
+  videos.forEach(prod => {
+    if (!map.has(prod.product_id)) {
+      map.set(prod.product_id, { ...prod, images: [], generated_videos: [] });
     }
-    map.get(vid.product_id).generated_videos.push(vid);
+    const entry = map.get(prod.product_id);
+    if (prod.generated_videos) entry.generated_videos.push(...prod.generated_videos);
   });
 
   return Array.from(map.values());
 }
 
-// ─── Load images grouped by outfit ──────────────────────
+// ─── Load images and videos grouped by outfit ──────────────────────
 async function loadMedia() {
-  const selectView = document.getElementById('selectView');
   selectView.innerHTML = '<div class="empty-state">Loading…</div>';
 
   try {
     const result = await fetchCombinedMedia(state.category);
     const outfits = combineMedia(result.images, result.videos);
-    console.log(outfits)
+    
     if (outfits.length === 0) {
       selectView.innerHTML = '<div class="empty-state">No media found for this category.</div>';
       return;
     }
 
     selectView.innerHTML = outfits.map(outfit => {
-  // Extract the actual image array (flattening the nested structure)
-  const allImages = outfit.images?.flatMap(item => item.images || []) || [];
-  
-  // Extract the actual video array (flattening the nested structure)
-  const allVideos = outfit.generated_videos?.flatMap(item => item.generated_videos || []) || [];
+      const allImages = outfit.images || [];
+      const allVideos = outfit.generated_videos || [];
 
-  return `
-      <div class="outfit-card">
-        <div class="outfit-header">
-          <span class="outfit-name">${outfit.outfit_name || (outfit.brand + ' ' + outfit.name)}</span>
-          <span class="outfit-price">₹${outfit.price || '-'}</span>
-        </div>
-      <div class="image-grid">
-        ${allImages.map(img => `
-          <div class="media-tile image-tile" 
-                data-is-image="${true}"
-              data-image-id="${img.image_id}" 
-               data-product-id="${outfit.product_id}"
-               data-image-url="${img.image_url}"
-               data-outfit-name="${outfit.outfit_name}">
-              <img src="${img.image_url}" loading="lazy">
-              <div class="check"></div>
-              <div class="tile-actions">
-                <button class="tile-btn" data-role="animate" title="Animate to video">🎬</button>
-                <button class="tile-btn" data-role="delete" title="Delete image">🗑</button>
+      return `
+        <div class="outfit-card">
+          <div class="outfit-header">
+            <span class="outfit-name">${outfit.outfit_name || ((outfit.brand || '') + ' ' + (outfit.name || ''))}</span>
+            <span class="outfit-price">₹${outfit.price || '-'}</span>
+          </div>
+          <div class="image-grid">
+            ${allImages.map(img => `
+              <div class="media-tile image-tile" 
+                   data-is-image="true"
+                   data-image-id="${img.image_id}" 
+                   data-product-id="${outfit.product_id}"
+                   data-image-url="${img.image_url}"
+                   data-outfit-name="${outfit.outfit_name || ''}">
+                <img src="${img.image_url}" loading="lazy">
+                <div class="check"></div>
+                <div class="tile-actions">
+                  <button class="tile-btn" data-role="animate" title="Animate to video">🎬</button>
+                  <button class="tile-btn" data-role="delete" title="Delete image">🗑</button>
+                </div>
               </div>
-            </div>
-          `).join('')}
+            `).join('')}
 
-        ${allVideos.map(vid => `
-          <div class="media-tile image-tile"
-                data-is-image="${false}"
-                data-image-id="${vid.video_url}" 
-               data-product-id="${outfit.product_id}"
-               data-image-url="${vid.video_url}"
-               data-outfit-name="${outfit.outfit_name}">
-              <div class="check"></div>
-            <video style="width: 100%;height: 100%;object-fit: cover;" src="${vid.video_url}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>
-            </div>
-          `).join('')}
+            ${allVideos.map(vid => `
+              <div class="media-tile image-tile"
+                   data-is-image="false"
+                   data-video-id="${vid.video_id}" 
+                   data-product-id="${outfit.product_id}"
+                   data-image-url="${vid.video_url}"
+                   data-outfit-name="${outfit.outfit_name || ''}">
+                <div class="check"></div>
+                <video style="width: 100%; height: 100%; object-fit: cover;" src="${vid.video_url}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>
+              </div>
+            `).join('')}
+          </div>
         </div>
-      </div>
-  `;
-}).join('');
-    // Attach listeners to all media tiles
+      `;
+    }).join('');
+
     document.querySelectorAll('.media-tile').forEach(tile => {
-      tile.addEventListener('click', () => toggleMedia(tile)); // Combined toggle logic
+      tile.addEventListener('click', () => toggleMedia(tile));
       
       const animateBtn = tile.querySelector('[data-role="animate"]');
       if (animateBtn) {
@@ -590,12 +579,11 @@ async function loadMedia() {
         });
       }
       
-      // Delete button listener (works for both images and videos)
       const deleteBtn = tile.querySelector('[data-role="delete"]');
       if (deleteBtn) {
         deleteBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          deleteImage(tile); // Ensure deleteImage handles both image_id and video_id
+          deleteImage(tile);
         });
       }
     });
@@ -605,38 +593,56 @@ async function loadMedia() {
     console.error("Error loading media:", err);
     selectView.innerHTML = '<div class="empty-state">Error loading content.</div>';
   }
-}// ─── Selection logic ─────────────────────────────────────
-function toggleMedia(tile) {
-  console.log(tile)
-  if(tile.imageId) {}
-  const imageId = tile.dataset.imageId;
-  const isImage = tile.dataset.isImage == "true"
-    const mediaType=isImage?'IMAGE':'VIDEO';
-  const existingIndex = state.selected.findIndex(s => s.media_type===mediaType && (isImage ? s.image_id==imageId : s.image_id==imageId));
+}
 
-  if (existingIndex >= 0) {
-    state.selected.splice(existingIndex, 1);
-  } else {
-    if (state.selected.length >= 10) {
-      alert('Max 10 items per post (Instagram carousel limit).');
-      return;
+// ─── Selection logic ─────────────────────────────────────
+function toggleMedia(tile) {
+  const isImage = tile.dataset.isImage === "true";
+  const mediaType = isImage ? 'IMAGE' : 'VIDEO';
+  const productId = tile.dataset.productId;
+  const imageUrl = tile.dataset.imageUrl;
+  const outfitName = tile.dataset.outfitName;
+  
+  let existingIndex = -1;
+  if (isImage) {
+    const imageId = tile.dataset.imageId;
+    existingIndex = state.selected.findIndex(s => s.media_type === 'IMAGE' && s.image_id == imageId);
+    if (existingIndex >= 0) {
+      state.selected.splice(existingIndex, 1);
+    } else {
+      if (state.selected.length >= 10) {
+        alert('Max 10 items per post (Instagram carousel limit).');
+        return;
+      }
+      state.selected.push({ media_type: 'IMAGE', image_id: imageId, product_id: productId, image_url: imageUrl, outfit_name: outfitName });
     }
-    state.selected.push({
-      media_type: isImage ? 'IMAGE' : 'VIDEO',
-      image_id: imageId,
-      product_id: tile.dataset.productId,
-      image_url: tile.dataset.imageUrl,
-      outfit_name: tile.dataset.outfitName
-    });
+  } else {
+    const videoId = tile.dataset.videoId;
+    existingIndex = state.selected.findIndex(s => s.media_type === 'VIDEO' && s.video_id == videoId);
+    if (existingIndex >= 0) {
+      state.selected.splice(existingIndex, 1);
+    } else {
+      if (state.selected.length >= 10) {
+        alert('Max 10 items per post (Instagram carousel limit).');
+        return;
+      }
+      state.selected.push({ media_type: 'VIDEO', video_id: videoId, product_id: productId, image_url: imageUrl, outfit_name: outfitName });
+    }
   }
   renderSelectionState();
 }
 
 function renderSelectionState() {
-  // update tile UI (images only — videos live in a separate tab/list)
+  // Update main grid interactive highlights
   document.querySelectorAll('.image-tile').forEach(tile => {
-    const imageId = tile.dataset.imageId;
-    const idx = state.selected.findIndex(s => s.image_id == imageId);
+    const isImage = tile.dataset.isImage === "true";
+    let idx = -1;
+    if (isImage) {
+      idx = state.selected.findIndex(s => s.media_type === 'IMAGE' && s.image_id == tile.dataset.imageId);
+    } else {
+      idx = state.selected.findIndex(s => s.media_type === 'VIDEO' && s.video_id == tile.dataset.videoId);
+    }
+    
     tile.classList.toggle('selected', idx >= 0);
     const existingBadge = tile.querySelector('.pos-badge');
     if (existingBadge) existingBadge.remove();
@@ -648,7 +654,14 @@ function renderSelectionState() {
     }
   });
 
-  // update tray
+  // Cross-sync video actions tab buttons if rendered
+  document.querySelectorAll('[data-action="select-video"]').forEach(btn => {
+    const videoId = btn.dataset.id;
+    const isSelected = state.selected.some(s => s.media_type === 'VIDEO' && s.video_id == videoId);
+    btn.textContent = isSelected ? 'Remove from post' : 'Add to post';
+  });
+
+  // Render lower tray drawer summary
   const count = state.selected.length;
   if (count > 0) {
     tray.classList.add('open');
@@ -670,7 +683,7 @@ document.getElementById('clearSelection').addEventListener('click', () => {
   renderSelectionState();
 });
 
-// ─── Combine selected clips (arbitrary images/videos, in selection order) ──
+// ─── Combine selected clips ──
 document.getElementById('combineBtn').addEventListener('click', combineSelected);
 
 async function combineSelected() {
@@ -680,15 +693,13 @@ async function combineSelected() {
   }
 
   const transitionInput = prompt('Transition duration between clips, in seconds:', '1');
-  if (transitionInput === null) return; // cancelled
+  if (transitionInput === null) return;
   const transitionDuration = Number(transitionInput) || 1;
 
   const items = state.selected.map(s => ({
     media_type: s.media_type || 'IMAGE',
     image_url: s.image_url,
     product_id: s.product_id
-    // images hold for a fixed default (COMBINE_IMAGE_HOLD_SECONDS on the server);
-    // bump this up with a per-item `duration` field later if you want per-clip control
   }));
 
   const combineBtn = document.getElementById('combineBtn');
@@ -707,8 +718,7 @@ async function combineSelected() {
       alert('Combining started! This can take a minute or two — it\'ll show up as a new video once ready.');
       state.selected = [];
       renderSelectionState();
-      if (typeof loadMedia === 'function') loadMedia();
-      else if (typeof loadImages === 'function') loadImages();
+      loadMedia();
     } else {
       alert('Failed to start combining: ' + (data.error || 'unknown error'));
     }
@@ -746,7 +756,7 @@ async function animateImage(tile, btn) {
     'Describe the motion (optional):',
     'Subtle natural motion, fabric sway, gentle camera drift'
   );
-  if (userPrompt === null) return; // user cancelled
+  if (userPrompt === null) return;
 
   const originalText = btn.textContent;
   btn.textContent = '⏳';
@@ -779,58 +789,63 @@ async function animateImage(tile, btn) {
 
 // ─── Videos tab ──────────────────────────────────────────
 async function loadVideos() {
-  const res = await fetch('/api/videos');
-  const videos = await res.json();
+  try {
+    const res = await fetch('/api/videos');
+    const videos = await res.json();
 
-  if (videos.length === 0) {
-    videosView.innerHTML = '<div class="empty-state">No videos yet. Tap 🎬 on any image to animate it.</div>';
-    return;
+    if (videos.length === 0) {
+      videosView.innerHTML = '<div class="empty-state">No videos yet. Tap 🎬 on any image to animate it.</div>';
+      return;
+    }
+
+    const anyProcessing = videos.some(v => v.status === 'processing');
+
+    videosView.innerHTML =
+      '<div class="video-hint">Videos post as a Reel on their own, or as a carousel item when combined with images.</div>' +
+      videos.map(v => `
+      <div class="video-card">
+        <div class="video-thumb">
+          ${v.status === 'ready'
+            ? `<video src="${v.video_url}" muted loop playsinline autoplay></video>`
+            : `<img src="${v.source_image_url}">`}
+          <div class="video-status-badge status-${v.status}">${v.status}</div>
+        </div>
+        <div class="video-info">
+          <span class="outfit-name">${v.outfit_name || ((v.brand || '') + ' ' + (v.name || ''))}</span>
+          ${v.status === 'ready' ? `
+            <div class="video-actions">
+              <button class="btn small" data-action="select-video" data-id="${v.id}">Add to post</button>
+              <button class="btn secondary small" data-action="delete-video" data-id="${v.id}">Delete</button>
+            </div>` :
+          v.status === 'failed' ? `
+            <div style="font-size:12px;color:var(--danger);">${v.error_message || 'Generation failed'}</div>
+            <button class="btn secondary small" data-action="delete-video" data-id="${v.id}">Remove</button>` :
+            `<div style="font-size:12px;color:var(--text-dim);">Processing… this can take a few minutes</div>`
+          }
+        </div>
+      </div>
+    `).join('');
+
+    videosView.querySelectorAll('[data-action="select-video"]').forEach(btn => {
+      const v = videos.find(v => v.id == btn.dataset.id);
+      btn.addEventListener('click', () => selectVideoForPost(v, btn));
+    });
+    
+    videosView.querySelectorAll('[data-action="delete-video"]').forEach(btn => {
+      btn.addEventListener('click', () => deleteVideo(btn.dataset.id));
+    });
+
+    if (!anyProcessing) clearInterval(videoPollTimer);
+    renderSelectionState();
+  } catch (err) {
+    console.error("Error loading videos:", err);
   }
-
-  const anyProcessing = videos.some(v => v.status === 'processing');
-
-  videosView.innerHTML =
-    '<div class="video-hint">Videos post as a Reel on their own, or as a carousel item when combined with images.</div>' +
-    videos.map(v => `
-    <div class="video-card">
-      <div class="video-thumb">
-        ${v.status === 'ready'
-          ? `<video src="${v.video_url}" muted loop playsinline autoplay></video>`
-          : `<img src="${v.source_image_url}">`}
-        <div class="video-status-badge status-${v.status}">${v.status}</div>
-      </div>
-      <div class="video-info">
-        <span class="outfit-name">${v.outfit_name || (v.brand || '') + ' ' + (v.name || '')}</span>
-        ${v.status === 'ready' ? `
-          <div class="video-actions">
-            <button class="btn small" data-action="select-video" data-id="${v.id}">Add to post</button>
-            <button class="btn secondary small" data-action="delete-video" data-id="${v.id}">Delete</button>
-          </div>` :
-        v.status === 'failed' ? `
-          <div style="font-size:12px;color:var(--danger);">${v.error_message || 'Generation failed'}</div>
-          <button class="btn secondary small" data-action="delete-video" data-id="${v.id}">Remove</button>` :
-          `<div style="font-size:12px;color:var(--text-dim);">Processing… this can take a few minutes</div>`
-        }
-      </div>
-    </div>
-  `).join('');
-
-  videosView.querySelectorAll('[data-action="select-video"]').forEach(btn => {
-    const v = videos.find(v => v.id == btn.dataset.id);
-    btn.addEventListener('click', () => selectVideoForPost(v, btn));
-  });
-  videosView.querySelectorAll('[data-action="delete-video"]').forEach(btn => {
-    btn.addEventListener('click', () => deleteVideo(btn.dataset.id));
-  });
-
-  if (!anyProcessing) clearInterval(videoPollTimer);
 }
 
 function selectVideoForPost(video, btn) {
   const idx = state.selected.findIndex(s => s.media_type === 'VIDEO' && s.video_id == video.id);
   if (idx >= 0) {
     state.selected.splice(idx, 1);
-    btn.textContent = 'Add to post';
   } else {
     if (state.selected.length >= 10) { alert('Max 10 items per post.'); return; }
     state.selected.push({
@@ -840,23 +855,26 @@ function selectVideoForPost(video, btn) {
       image_url: video.video_url,
       outfit_name: video.outfit_name
     });
-    btn.textContent = 'Remove from post';
   }
   renderSelectionState();
 }
 
 async function deleteVideo(id) {
   if (!confirm('Delete this video? This removes it from Cloudinary too.')) return;
-  const res = await fetch('/api/videos/' + id, { method: 'DELETE' });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    alert(data.error || 'Failed to delete video.');
-    return;
+  try {
+    const res = await fetch('/api/videos/' + id, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Failed to delete video.');
+      return;
+    }
+    const idx = state.selected.findIndex(s => s.media_type === 'VIDEO' && s.video_id == id);
+    if (idx >= 0) state.selected.splice(idx, 1);
+    renderSelectionState();
+    loadVideos();
+  } catch (err) {
+    alert('Error deleting video: ' + err.message);
   }
-  const idx = state.selected.findIndex(s => s.media_type === 'VIDEO' && s.video_id == id);
-  if (idx >= 0) state.selected.splice(idx, 1);
-  renderSelectionState();
-  loadVideos();
 }
 
 // ─── Modal: caption + schedule ──────────────────────────
@@ -871,11 +889,14 @@ document.getElementById('openCaptionModal').addEventListener('click', () => {
       ? (hasVideo ? 'Reel' : 'Single image post')
       : `Carousel — ${state.selected.length} items${hasVideo ? ' (includes video)' : ''}`;
 
-  const outfitNames = [...new Set(state.selected.map(s => s.outfit_name))];
-  document.getElementById('captionInput').value = 
-    outfitNames.length > 1 
-      ? `${outfitNames.length} looks you'll love this week ✨\n\nDM "link" for shopping details 🛍️`
-      : `${outfitNames[0]} ✨\n\nDM "link" to shop this look 🛍️`;
+  const outfitNames = [...new Set(state.selected.map(s => s.outfit_name).filter(Boolean))];
+  if (outfitNames.length > 1) {
+    document.getElementById('captionInput').value = `${outfitNames.length} looks you'll love this week ✨\n\nDM "link" for shopping details 🛍️`;
+  } else if (outfitNames.length === 1) {
+    document.getElementById('captionInput').value = `${outfitNames[0]} ✨\n\nDM "link" to shop this look 🛍️`;
+  } else {
+    document.getElementById('captionInput').value = `New looks ✨\n\nDM "link" to shop 🛍️`;
+  }
 
   const defaultTime = new Date();
   defaultTime.setDate(defaultTime.getDate() + 1);
@@ -902,61 +923,79 @@ document.getElementById('confirmQueue').addEventListener('click', async () => {
     position: i + 1
   }));
 
-  const res = await fetch('/api/queue', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, caption, scheduled_for })
-  });
+  try {
+    const res = await fetch('/api/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, caption, scheduled_for })
+    });
 
-  if (res.ok) {
-    modalBackdrop.classList.remove('open');
-    state.selected = [];
-    renderSelectionState();
-    alert('Added to queue!');
-  } else {
-    alert('Failed to add to queue.');
+    if (res.ok) {
+      modalBackdrop.classList.remove('open');
+      state.selected = [];
+      renderSelectionState();
+      alert('Added to queue!');
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert('Failed to add to queue: ' + (data.error || 'Unknown error'));
+    }
+  } catch (err) {
+    alert('Error queuing post: ' + err.message);
   }
 });
 
 // ─── Queue view ──────────────────────────────────────────
 async function loadQueue() {
   queueView.innerHTML = '<div class="empty-state">Loading…</div>';
-  const res = await fetch('/api/queue');
-  const items = await res.json();
+  try {
+    const res = await fetch('/api/queue');
+    const items = await res.json();
 
-  if (items.length === 0) {
-    queueView.innerHTML = '<div class="empty-state">No posts queued yet.</div>';
-    return;
-  }
+    if (items.length === 0) {
+      queueView.innerHTML = '<div class="empty-state">No posts queued yet.</div>';
+      return;
+    }
 
-  queueView.innerHTML = items.map(item => {
-    const typeByPosition = {};
-    (item.products || []).forEach(p => { typeByPosition[p.position] = p.media_type; });
-    return `
-    <div class="queue-item">
-      <div class="q-row">
-        <span class="q-time">${item.scheduled_for ? new Date(item.scheduled_for).toLocaleString() : 'Not scheduled'}</span>
-        <span>
-          <span class="q-status">${item.status}</span>
-          ${item.media_type ? `<span class="q-media-type">${item.media_type}</span>` : ''}
-        </span>
+    queueView.innerHTML = items.map(item => {
+      const typeByPosition = {};
+      (item.products || []).forEach(p => { typeByPosition[p.position] = p.media_type; });
+      return `
+      <div class="queue-item">
+        <div class="q-row">
+          <span class="q-time">${item.scheduled_for ? new Date(item.scheduled_for).toLocaleString() : 'Not scheduled'}</span>
+          <span>
+            <span class="q-status">${item.status}</span>
+            ${item.media_type ? `<span class="q-media-type">${item.media_type}</span>` : ''}
+          </span>
+        </div>
+        <div class="q-imgs">${(item.image_urls || []).map((u, i) =>
+          typeByPosition[i + 1] === 'VIDEO'
+            ? `<video src="${u}" muted></video>`
+            : `<img src="${u}">`
+        ).join('')}</div>
+        <div class="q-caption">${(item.caption || '').slice(0, 100)}</div>
+        ${item.status === 'pending' ? `<button class="q-delete" data-action="delete-queue" data-id="${item.id}">Remove from queue</button>` : ''}
       </div>
-      <div class="q-imgs">${item.image_urls.map((u, i) =>
-        typeByPosition[i + 1] === 'VIDEO'
-          ? `<video src="${u}" muted></video>`
-          : `<img src="${u}">`
-      ).join('')}</div>
-      <div class="q-caption">${(item.caption || '').slice(0, 100)}</div>
-      ${item.status === 'pending' ? `<button class="q-delete" onclick="deleteQueueItem(${item.id})">Remove from queue</button>` : ''}
-    </div>
-  `;
-  }).join('');
+    `;
+    }).join('');
+
+    queueView.querySelectorAll('[data-action="delete-queue"]').forEach(btn => {
+      btn.addEventListener('click', () => deleteQueueItem(btn.dataset.id));
+    });
+  } catch (err) {
+    console.error("Error loading queue:", err);
+    queueView.innerHTML = '<div class="empty-state">Error loading queue.</div>';
+  }
 }
 
 async function deleteQueueItem(id) {
   if (!confirm('Remove this post from the queue?')) return;
-  await fetch('/api/queue/' + id, { method: 'DELETE' });
-  loadQueue();
+  try {
+    await fetch('/api/queue/' + id, { method: 'DELETE' });
+    loadQueue();
+  } catch (err) {
+    alert('Error deleting queue item: ' + err.message);
+  }
 }
 
 // ─── Init ────────────────────────────────────────────────

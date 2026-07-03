@@ -4,6 +4,7 @@ const axios = require('axios');
 const cloudinary = require('cloudinary').v2;
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+const ffprobeStatic = require('ffprobe-static');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
@@ -12,6 +13,7 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobeStatic.path);
 
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -22,26 +24,23 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// ─── Magic Hour (image → video) config ────────────────────────────────────
+// ─── Magic Hour Config ───────────────────────────────────────────
 const MAGIC_HOUR_API_KEY = process.env.MAGIC_HOUR_API_KEY;
 const MAGIC_HOUR_BASE = 'https://api.magichour.ai/v1';
-// NOTE: verify these against docs.magichour.ai before relying on them in prod —
-// Magic Hour ships new models often and the model/resolution names below are current
-// as of writing but not guaranteed to stay valid. Do one manual test call first.
 const MAGIC_HOUR_MODEL = process.env.MAGIC_HOUR_MODEL || 'ltx-2.3';
 const MAGIC_HOUR_RESOLUTION = process.env.MAGIC_HOUR_RESOLUTION || '720p';
 const MAGIC_HOUR_DURATION_SECONDS = Number(process.env.MAGIC_HOUR_DURATION_SECONDS || 5);
 
-// ─── Basic auth — required since this gets exposed via a public tunnel ───
+// ─── Basic Auth Setup ────────────────────────────────────────────
 const DASH_USER = process.env.DASH_USER || 'admin';
 const DASH_PASS = process.env.DASH_PASS;
 
 if (!DASH_PASS) {
-  console.error('⚠️  DASH_PASS not set in .env — dashboard will run UNPROTECTED. Set DASH_PASS before tunneling.');
+  console.error('⚠️ DASH_PASS not set in .env — dashboard will run UNPROTECTED. Set DASH_PASS before tunneling.');
 }
 
 app.use((req, res, next) => {
-  if (!DASH_PASS) return next(); // no password configured, skip (local-only use)
+  if (!DASH_PASS) return next();
 
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Basic ')) {
@@ -56,18 +55,15 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use(express.static(require('path').join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Cloudinary URL helpers ────────────────────────────────────────────────
-// Cloudinary URLs look like:
-//   https://res.cloudinary.com/<cloud>/image/upload/v169.../folder/sub/name.jpg
-// public_id = "folder/sub/name" (no extension, no version segment)
+// ─── Cloudinary URL Helpers ──────────────────────────────────────
 function getPublicIdFromCloudinaryUrl(url) {
   try {
     const afterUpload = url.split('/upload/')[1];
     if (!afterUpload) return null;
     const parts = afterUpload.split('/');
-    if (/^v\d+$/.test(parts[0])) parts.shift(); // drop version segment
+    if (/^v\d+$/.test(parts[0])) parts.shift();
     const last = parts.pop();
     const noExt = last.replace(/\.[a-zA-Z0-9]+$/, '');
     return [...parts, noExt].join('/');
@@ -82,7 +78,7 @@ function getFolderFromCloudinaryUrl(url) {
   return publicId.split('/').slice(0, -1).join('/');
 }
 
-// ─── Magic Hour helpers ─────────────────────────────────────────────────────
+// ─── Magic Hour Helpers ──────────────────────────────────────────
 async function startImageToVideo(imageUrl, userPrompt) {
   const res = await axios.post(`${MAGIC_HOUR_BASE}/image-to-video`, {
     name: `VisionCraft video ${Date.now()}`,
@@ -102,10 +98,7 @@ async function startImageToVideo(imageUrl, userPrompt) {
   return res.data.id;
 }
 
-// ─── Combine arbitrary clips (images + videos) into one video ────────────
-// Runs locally via ffmpeg (ffmpeg-static bundles the binary, no system
-// install needed) instead of chaining Cloudinary URL transformations —
-// simpler to reason about for an arbitrary, user-picked list of clips.
+// ─── FFmpeg Video Combiner Config & Logic ───────────────────────
 const COMBINE_WIDTH = Number(process.env.COMBINE_WIDTH || 1080);
 const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1350);
 const COMBINE_FPS = Number(process.env.COMBINE_FPS || 30);
@@ -130,9 +123,6 @@ function probeDuration(filePath) {
   });
 }
 
-// Scales/pads every clip to the same size+fps (required for xfade), then
-// chains a cross-fade between each consecutive pair. Works the same way
-// whether there are 2 clips or 8 — no manual layer nesting.
 function buildScaleAndXfadeFilter(clips, transitionDuration) {
   const scaleParts = clips.map((c, i) =>
     `[${i}:v]scale=${COMBINE_WIDTH}:${COMBINE_HEIGHT}:force_original_aspect_ratio=decrease,` +
@@ -144,7 +134,6 @@ function buildScaleAndXfadeFilter(clips, transitionDuration) {
   let cumulative = clips[0].duration;
   for (let i = 1; i < clips.length; i++) {
     const outLabel = i === clips.length - 1 ? 'vout' : `x${i}`;
-    // each transition eats `transitionDuration` seconds from the running total
     const offset = Math.max(cumulative - transitionDuration, 0.1);
     xfadeParts.push(
       `[${lastLabel}][s${i}]xfade=transition=fade:duration=${transitionDuration}:offset=${offset.toFixed(2)}[${outLabel}]`
@@ -156,8 +145,6 @@ function buildScaleAndXfadeFilter(clips, transitionDuration) {
   return { filter: [...scaleParts, ...xfadeParts].join(';'), outputLabel: lastLabel };
 }
 
-// Runs in the background — the caller responds immediately and the frontend
-// polls /api/videos for the status flip, same pattern as Magic Hour jobs.
 async function runCombineJob(videoRowId, items, transitionDuration) {
   const jobDir = path.join(os.tmpdir(), `combine_${videoRowId}_${crypto.randomBytes(4).toString('hex')}`);
   await fsp.mkdir(jobDir, { recursive: true });
@@ -189,8 +176,6 @@ async function runCombineJob(videoRowId, items, transitionDuration) {
       });
       cmd
         .complexFilter(filter, outputLabel)
-        // audio is dropped for simplicity — fine for silent AI-generated motion
-        // clips, but flag it if you start combining clips that have real audio
         .outputOptions(['-an', '-c:v libx264', '-pix_fmt yuv420p', '-movflags +faststart'])
         .output(outputPath)
         .on('error', reject)
@@ -198,7 +183,6 @@ async function runCombineJob(videoRowId, items, transitionDuration) {
         .run();
     });
 
-    // Upload into the same Cloudinary folder as the first source clip
     const folder = getFolderFromCloudinaryUrl(items[0].image_url);
     const uploadResult = await cloudinary.uploader.upload(outputPath, {
       resource_type: 'video',
@@ -223,7 +207,8 @@ async function runCombineJob(videoRowId, items, transitionDuration) {
   }
 }
 
-// ─── Get all categories that have images available ───────────────────────
+// ─── API Routes ──────────────────────────────────────────────────
+
 app.get('/api/categories', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -241,7 +226,6 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// ─── Get all images for a given category, grouped by product ─────────────
 app.get('/api/images', async (req, res) => {
   const { category } = req.query;
   try {
@@ -256,7 +240,6 @@ app.get('/api/images', async (req, res) => {
       ORDER BY p.id DESC, pi.id ASC
     `, [category || null]);
 
-    // group by product
     const grouped = {};
     for (const row of result.rows) {
       if (!grouped[row.product_id]) {
@@ -300,7 +283,6 @@ app.get('/api/videos/grouped', async (req, res) => {
       ORDER BY p.id DESC, v.created_at DESC
     `, [category || null]);
 
-    // Grouping by product
     const grouped = {};
     for (const row of result.rows) {
       if (!grouped[row.product_id]) {
@@ -312,12 +294,12 @@ app.get('/api/videos/grouped', async (req, res) => {
           price: row.price,
           affiliate_link: row.affiliate_link,
           category: row.category,
-          generated_videos: [] // Renamed for clarity
+          generated_videos: [],
         };
       }
       
-      // Add the video-specific data to the product's list
-      grouped[row.product_id].generated_videos.push({
+        console.log("row.status", row.status)
+      if(row.status != "failed") {      grouped[row.product_id].generated_videos.push({
         video_id: row.video_id,
         source_image_url: row.source_image_url,
         video_url: row.video_url,
@@ -327,6 +309,8 @@ app.get('/api/videos/grouped', async (req, res) => {
         error_message: row.error_message,
         created_at: row.created_at
       });
+      }
+
     }
     
     res.json(Object.values(grouped));
@@ -335,7 +319,7 @@ app.get('/api/videos/grouped', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// ─── Rate / mark an image selected (used for quality review, optional) ───
+
 app.post('/api/images/:imageId/rate', async (req, res) => {
   const { imageId } = req.params;
   const { quality_score, selected } = req.body;
@@ -351,7 +335,6 @@ app.post('/api/images/:imageId/rate', async (req, res) => {
   }
 });
 
-// ─── Delete an image (DB row + best-effort Cloudinary cleanup) ───────────
 app.delete('/api/images/:imageId', async (req, res) => {
   const { imageId } = req.params;
   try {
@@ -359,8 +342,6 @@ app.delete('/api/images/:imageId', async (req, res) => {
     if (imgRes.rows.length === 0) return res.status(404).json({ error: 'Image not found' });
     const imageUrl = imgRes.rows[0].image_url;
 
-    // Block delete if the image is referenced by a queued (not-yet-posted) post,
-    // to avoid the worker publishing a dead URL.
     const inUse = await pool.query(
       `SELECT 1 FROM post_queue_items pqi
        JOIN post_queue pq ON pq.id = pqi.post_queue_id
@@ -372,7 +353,6 @@ app.delete('/api/images/:imageId', async (req, res) => {
     }
 
     await pool.query(`UPDATE post_queue_items SET image_id = NULL WHERE image_id = $1`, [imageId]);
-
     await pool.query(`DELETE FROM product_images WHERE id = $1`, [imageId]);
 
     if (process.env.CLOUDINARY_CLOUD_NAME && imageUrl && imageUrl.includes('res.cloudinary.com')) {
@@ -380,7 +360,6 @@ app.delete('/api/images/:imageId', async (req, res) => {
         const publicId = getPublicIdFromCloudinaryUrl(imageUrl);
         if (publicId) await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
       } catch (cloudErr) {
-        // DB row is already gone — log and move on rather than failing the request
         console.error('Cloudinary delete failed (DB row already removed):', cloudErr.message);
       }
     }
@@ -392,7 +371,6 @@ app.delete('/api/images/:imageId', async (req, res) => {
   }
 });
 
-// ─── Kick off an image→video job via Magic Hour ───────────────────────────
 app.post('/api/videos/generate', async (req, res) => {
   const { image_id, product_id, image_url, prompt } = req.body;
   if (!image_id || !image_url || !product_id) {
@@ -403,10 +381,11 @@ app.post('/api/videos/generate', async (req, res) => {
   }
   try {
     const projectId = await startImageToVideo(image_url, prompt);
+    const parsedProductId = parseInt(product_id, 10);
     const insertRes = await pool.query(
       `INSERT INTO product_videos (product_id, source_image_id, source_image_url, magic_hour_project_id, status, prompt, product_ids)
        VALUES ($1, $2, $3, $4, 'processing', $5, ARRAY[$1]::integer[]) RETURNING id`,
-      [product_id, image_id, image_url, projectId, prompt || null]
+      [parsedProductId, parseInt(image_id, 10), image_url, projectId, prompt || null]
     );
     res.json({ ok: true, video_id: insertRes.rows[0].id, magic_hour_project_id: projectId });
   } catch (err) {
@@ -415,17 +394,14 @@ app.post('/api/videos/generate', async (req, res) => {
   }
 });
 
-// ─── Combine an ordered list of picked images/videos into one video ──────
 app.post('/api/videos/combine', async (req, res) => {
   const { items, transition_duration } = req.body;
-  // items: [{ media_type: 'IMAGE'|'VIDEO', image_url, product_id, duration? }] in play order
 
   if (!items || items.length < 2) {
     return res.status(400).json({ error: 'Pick at least 2 clips to combine' });
   }
   const transitionDuration = Number(transition_duration) > 0 ? Number(transition_duration) : 1;
-  // every distinct product represented in the clips being combined, in first-seen order
-  const productIds = [...new Set(items.map(i => i.product_id).filter(Boolean))];
+  const productIds = [...new Set(items.map(i => parseInt(i.product_id, 10)).filter(Boolean))];
 
   try {
     const insertRes = await pool.query(
@@ -435,7 +411,6 @@ app.post('/api/videos/combine', async (req, res) => {
     );
     const videoRowId = insertRes.rows[0].id;
 
-    // respond immediately — the frontend polls /api/videos for the status flip
     res.json({ ok: true, video_id: videoRowId });
 
     runCombineJob(videoRowId, items, transitionDuration);
@@ -445,7 +420,6 @@ app.post('/api/videos/combine', async (req, res) => {
   }
 });
 
-// ─── List generated videos (for the Videos tab) ───────────────────────────
 app.get('/api/videos', async (req, res) => {
   const { status } = req.query;
   try {
@@ -463,7 +437,6 @@ app.get('/api/videos', async (req, res) => {
   }
 });
 
-// ─── Delete a video (DB row + best-effort Cloudinary cleanup) ────────────
 app.delete('/api/videos/:id', async (req, res) => {
   try {
     const vRes = await pool.query(`SELECT cloudinary_public_id FROM product_videos WHERE id = $1`, [req.params.id]);
@@ -493,11 +466,8 @@ app.delete('/api/videos/:id', async (req, res) => {
   }
 });
 
-// ─── Create a post (single/carousel image and/or video items) ────────────
 app.post('/api/queue', async (req, res) => {
   const { items, caption, scheduled_for } = req.body;
-  // items: [{ product_id, image_id, video_id, image_url, media_type, position }]
-  // media_type per item: 'IMAGE' | 'VIDEO'
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'No items selected' });
@@ -524,19 +494,22 @@ app.post('/api/queue', async (req, res) => {
       const insertItemRes = await client.query(
         `INSERT INTO post_queue_items (post_queue_id, product_id, image_id, video_id, position, media_type)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [postQueueId, item.product_id, isVideo ? null : item.image_id, isVideo ? item.video_id : null, item.position, item.media_type || 'IMAGE']
+        [
+          postQueueId, 
+          item.product_id ? parseInt(item.product_id, 10) : null, 
+          (isVideo || !item.image_id) ? null : parseInt(item.image_id, 10), 
+          (!isVideo || !item.video_id) ? null : parseInt(item.video_id, 10), 
+          item.position, 
+          item.media_type || 'IMAGE'
+        ]
       );
       const queueItemId = insertItemRes.rows[0].id;
 
-      // A video item may represent several products (a combined video);
-      // an image item always represents exactly one. Either way, every
-      // product this item should give out a link for goes into this table —
-      // it's what the IG webhook reads from when someone asks "link".
-      let productIdsForItem = [item.product_id].filter(Boolean);
+      let productIdsForItem = [item.product_id ? parseInt(item.product_id, 10) : null].filter(Boolean);
       if (isVideo && item.video_id) {
         const vidRes = await client.query(
           `SELECT product_ids, product_id FROM product_videos WHERE id = $1`,
-          [item.video_id]
+          [parseInt(item.video_id, 10)]
         );
         if (vidRes.rows.length > 0) {
           const row = vidRes.rows[0];
@@ -566,7 +539,6 @@ app.post('/api/queue', async (req, res) => {
   }
 });
 
-// ─── List queued/scheduled posts ──────────────────────────────────────────
 app.get('/api/queue', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -589,7 +561,6 @@ app.get('/api/queue', async (req, res) => {
   }
 });
 
-// ─── Delete a queued post (before it's posted) ────────────────────────────
 app.delete('/api/queue/:id', async (req, res) => {
   try {
     await pool.query(`DELETE FROM post_queue WHERE id = $1 AND status = 'pending'`, [req.params.id]);
@@ -603,7 +574,6 @@ app.delete('/api/queue/:id', async (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Dashboard running:`);
-  console.log(`   Local:   http://localhost:${PORT}`);
-  console.log(`   Network: http://<your-laptop-ip>:${PORT}  (open this on your phone)\n`);
-  console.log(`   Find your laptop IP with: ifconfig (Mac/Linux) or ipconfig (Windows)\n`);
+  console.log(` Local: http://localhost:${PORT}`);
+  console.log(` Network: http://<your-laptop-ip>:${PORT}\n`);
 });
