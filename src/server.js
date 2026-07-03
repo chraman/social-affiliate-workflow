@@ -104,137 +104,106 @@ const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1350);
 const COMBINE_FPS = Number(process.env.COMBINE_FPS || 30);
 const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS || 3);
 
-async function runCombineJob(videoRowId, items, transitionDuration) {
+async function runCombineJob(videoRowId, items) {
   try {
     if (!items || items.length === 0) {
       throw new Error("No items provided to combine.");
     }
 
-    // Utility function to extract the public ID from your existing Cloudinary URLs
-    function getPublicIdFromUrl(url) {
-      try {
-        const parts = url.split('/upload/');
-        if (parts.length < 2) return null;
-        let remaining = parts[1];
-        // Strip out version prefix if present (e.g., v12345678/)
-        if (remaining.startsWith('v') && !isNaN(remaining.split('/')[0].substring(1))) {
-          remaining = remaining.substring(remaining.indexOf('/') + 1);
-        }
-        // Strip out the file extension (.mp4, .jpg, etc.)
-        const lastDotIndex = remaining.lastIndexOf('.');
-        if (lastDotIndex !== -1) {
-          remaining = remaining.substring(0, lastDotIndex);
-        }
-        return remaining;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    // Find the first video item to serve as the base clip for the video timeline
+    // Find the first video item to serve as the baseline timeline asset
     const baseVideoIndex = items.findIndex(item => item.media_type === 'VIDEO');
     let basePublicId = '';
-    let isDummyBase = false;
+    let isOnlyImages = false;
 
     if (baseVideoIndex !== -1) {
-      basePublicId = getPublicIdFromUrl(items[baseVideoIndex].image_url);
+      basePublicId = getPublicIdFromCloudinaryUrl(items[baseVideoIndex].image_url);
     } else {
-      // If the list consists ONLY of images, use a default placeholder video asset as a base,
-      // splice the images onto it, and then trim out the placeholder at the end.
+      // Fallback: if there are no videos at all, use a standard base asset, 
+      // splice everything onto it, and trim it out at the end.
       basePublicId = 'samples/sea-turtle'; 
-      isDummyBase = true;
+      isOnlyImages = true;
     }
 
     if (!basePublicId) {
       throw new Error("Could not determine base asset public ID from Cloudinary URL.");
     }
 
-    // Initialize the transformation array with your custom canvas dimensions (1080x1350)
+    // Initialize the canvas transformation layout (1080x1350 portrait)
     const transformation = [
       { width: 1080, height: 1350, crop: 'fill' }
     ];
 
-    if (isDummyBase) {
-      // Scenario A: Only images exist. Append all items sequentially to the dummy base video.
+    // Snappy fast transition speed (0.3 seconds)
+    const fastTransition = 'transition_(name_fade;du_0.3)';
+
+    if (isOnlyImages) {
+      // Scenario A: Only images exist. Append all items with zoompan sequence.
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const publicId = getPublicIdFromUrl(item.image_url);
+        const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
         if (!publicId) continue;
 
         const formattedId = publicId.replace(/\//g, ':');
         transformation.push({
           overlay: formattedId,
-          flags: 'splice',
-          duration: Number(item.duration || COMBINE_IMAGE_HOLD_SECONDS || 3)
+          flags: `splice:${fastTransition}`,
+          duration: 3,            // Hold images for exactly 3 seconds
+          effect: 'zoompan'       // Add dynamic smooth zoom-in motion
         });
         transformation.push({ width: 1080, height: 1350, crop: 'fill' });
         transformation.push({ flags: 'layer_apply' });
       }
+      // Trim off the 15-second sample turtle base video completely
+      transformation.push({ start_offset: 15.0 });
     } else {
-      // Scenario B: Mixed media or all videos.
-      // 1. Prepend items that sit BEFORE our base video clip (moving backwards to keep original index order)
+      // Scenario B: Mixed media.
+      // 1. Prepend assets that sit BEFORE our base video clip (moving backward)
       for (let i = baseVideoIndex - 1; i >= 0; i--) {
         const item = items[i];
-        const publicId = getPublicIdFromUrl(item.image_url);
+        const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
         if (!publicId) continue;
 
         const formattedId = publicId.replace(/\//g, ':');
-        if (item.media_type === 'VIDEO') {
-          transformation.push({
-            overlay: `video:${formattedId}`,
-            flags: `splice:transition_(name_fade;du_${transitionDuration})`
-          });
-        } else {
-          transformation.push({
-            overlay: formattedId,
-            flags: 'splice',
-            duration: Number(item.duration || COMBINE_IMAGE_HOLD_SECONDS || 3)
-          });
-        }
+        const isVideo = item.media_type === 'VIDEO';
+
+        transformation.push({
+          overlay: isVideo ? `video:${formattedId}` : formattedId,
+          flags: `splice:${fastTransition}`,
+          ...(isVideo ? {} : { duration: 3, effect: 'zoompan' }) // No duration for videos, let them play naturally
+        });
         transformation.push({ width: 1080, height: 1350, crop: 'fill' });
-        transformation.push({ flags: 'layer_apply', start_offset: 0 }); // start_offset: 0 forces prepend to front
+        transformation.push({ flags: 'layer_apply', start_offset: 0 }); // start_offset 0 forces prepend
       }
 
-      // 2. Append items that sit AFTER our base video clip moving forward
+      // 2. Append assets that sit AFTER our base video clip (moving forward)
       for (let i = baseVideoIndex + 1; i < items.length; i++) {
         const item = items[i];
-        const publicId = getPublicIdFromUrl(item.image_url);
+        const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
         if (!publicId) continue;
 
         const formattedId = publicId.replace(/\//g, ':');
-        if (item.media_type === 'VIDEO') {
-          transformation.push({
-            overlay: `video:${formattedId}`,
-            flags: `splice:transition_(name_fade;du_${transitionDuration})`
-          });
-        } else {
-          transformation.push({
-            overlay: formattedId,
-            flags: 'splice',
-            duration: Number(item.duration || COMBINE_IMAGE_HOLD_SECONDS || 3)
-          });
-        }
+        const isVideo = item.media_type === 'VIDEO';
+
+        transformation.push({
+          overlay: isVideo ? `video:${formattedId}` : formattedId,
+          flags: `splice:${fastTransition}`,
+          ...(isVideo ? {} : { duration: 3, effect: 'zoompan' }) // No duration for videos, let them play naturally
+        });
         transformation.push({ width: 1080, height: 1350, crop: 'fill' });
         transformation.push({ flags: 'layer_apply' });
       }
     }
 
-    // If a dummy video base was used, skip past it so only our custom media plays
-    if (isDummyBase) {
-      transformation.push({ start_offset: 15.0 }); // samples/sea-turtle is exactly 15 seconds long
-    }
-
-    // Critically important optimization properties for pristine, low-artifact output
+    // Force high-efficiency compression properties on the final stitched timeline
     transformation.push({ quality: 'auto', fetch_format: 'auto' });
 
-    // Generate the dynamic manipulation URL
+    // Build the dynamic manipulation URL
     const sourceUrl = cloudinary.url(basePublicId, {
       resource_type: 'video',
       transformation: transformation
     });
 
-    // Pass the generated manipulation URL directly into the upload API to "bake" it 
-    // into a permanent static file asset without using any local CPU or disk storage.
+    // Upload the Cloudinary generation URL back into an explicit static video asset
     const folder = getFolderFromCloudinaryUrl(items[0].image_url);
     const uploadResult = await cloudinary.uploader.upload(sourceUrl, {
       resource_type: 'video',
@@ -243,12 +212,12 @@ async function runCombineJob(videoRowId, items, transitionDuration) {
       overwrite: true
     });
 
-    // Persist the resulting video configuration to the database
+    // Persist final data back to the post queue database
     await pool.query(
       `UPDATE product_videos SET status = 'ready', video_url = $1, cloudinary_public_id = $2, updated_at = NOW() WHERE id = $3`,
       [uploadResult.secure_url, uploadResult.public_id, videoRowId]
     );
-    console.log(`✅ Combined video #${videoRowId} ready via Cloudinary API → ${uploadResult.secure_url}`);
+    console.log(`✅ Combined video #${videoRowId} ready via Cloudinary Cloud API → ${uploadResult.secure_url}`);
   } catch (err) {
     console.error(`❌ Cloudinary Combine job #${videoRowId} failed:`, err.message);
     await pool.query(
@@ -446,12 +415,11 @@ app.post('/api/videos/generate', async (req, res) => {
 });
 
 app.post('/api/videos/combine', async (req, res) => {
-  const { items, transition_duration } = req.body;
+  const { items } = req.body;
 
   if (!items || items.length < 2) {
     return res.status(400).json({ error: 'Pick at least 2 clips to combine' });
   }
-  const transitionDuration = Number(transition_duration) > 0 ? Number(transition_duration) : 1;
   const productIds = [...new Set(items.map(i => parseInt(i.product_id, 10)).filter(Boolean))];
 
   try {
@@ -464,7 +432,7 @@ app.post('/api/videos/combine', async (req, res) => {
 
     res.json({ ok: true, video_id: videoRowId });
 
-    runCombineJob(videoRowId, items, transitionDuration);
+    runCombineJob(videoRowId, items);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

@@ -560,6 +560,9 @@ async function loadMedia() {
                    data-image-url="${vid.video_url}"
                    data-outfit-name="${outfit.outfit_name || ''}">
                 <div class="check"></div>
+                <div class="tile-actions">
+                  <button class="tile-btn" data-role="delete" title="Delete Video">🗑</button>
+                </div>
                 <video style="width: 100%; height: 100%; object-fit: cover;" src="${vid.video_url}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>
               </div>
             `).join('')}
@@ -583,7 +586,8 @@ async function loadMedia() {
       if (deleteBtn) {
         deleteBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          deleteImage(tile);
+          console.log(tile.dataset.isImage,tile.dataset.videoId)
+          tile.dataset.isImage != 'false' ? deleteImage(tile) : deleteVideo(tile.dataset.videoId);
         });
       }
     });
@@ -692,10 +696,6 @@ async function combineSelected() {
     return;
   }
 
-  const transitionInput = prompt('Transition duration between clips, in seconds:', '1');
-  if (transitionInput === null) return;
-  const transitionDuration = Number(transitionInput) || 1;
-
   const items = state.selected.map(s => ({
     media_type: s.media_type || 'IMAGE',
     image_url: s.image_url,
@@ -711,7 +711,7 @@ async function combineSelected() {
     const res = await fetch('/api/videos/combine', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, transition_duration: transitionDuration })
+      body: JSON.stringify({ items })
     });
     const data = await res.json();
     if (res.ok) {
@@ -860,6 +860,7 @@ function selectVideoForPost(video, btn) {
 }
 
 async function deleteVideo(id) {
+  console.log("here")
   if (!confirm('Delete this video? This removes it from Cloudinary too.')) return;
   try {
     const res = await fetch('/api/videos/' + id, { method: 'DELETE' });
