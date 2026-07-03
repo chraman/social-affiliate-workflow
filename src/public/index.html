@@ -540,29 +540,46 @@ async function loadMedia() {
   const allVideos = outfit.generated_videos?.flatMap(item => item.generated_videos || []) || [];
 
   return `
-    <div class="outfit-card">
-      <div class="outfit-header">
-        <span class="outfit-name">${outfit.outfit_name}</span>
-      </div>
+      <div class="outfit-card">
+        <div class="outfit-header">
+          <span class="outfit-name">${outfit.outfit_name || (outfit.brand + ' ' + outfit.name)}</span>
+          <span class="outfit-price">₹${outfit.price || '-'}</span>
+        </div>
       <div class="image-grid">
         ${allImages.map(img => `
-          <div class="media-tile image-tile" data-id="${img.image_id}">
-            <img src="${img.image_url}" loading="lazy">
-          </div>
-        `).join('')}
+          <div class="media-tile image-tile" 
+                data-is-image="${true}"
+              data-image-id="${img.image_id}" 
+               data-product-id="${outfit.product_id}"
+               data-image-url="${img.image_url}"
+               data-outfit-name="${outfit.outfit_name}">
+              <img src="${img.image_url}" loading="lazy">
+              <div class="check"></div>
+              <div class="tile-actions">
+                <button class="tile-btn" data-role="animate" title="Animate to video">🎬</button>
+                <button class="tile-btn" data-role="delete" title="Delete image">🗑</button>
+              </div>
+            </div>
+          `).join('')}
 
         ${allVideos.map(vid => `
-          <div class="media-tile image-tile" data-id="${vid.video_id}">
+          <div class="media-tile image-tile"
+                data-is-image="${false}"
+                data-image-id="${vid.video_url}" 
+               data-product-id="${outfit.product_id}"
+               data-image-url="${vid.video_url}"
+               data-outfit-name="${outfit.outfit_name}">
+              <div class="check"></div>
             <video style="width: 100%;height: 100%;object-fit: cover;" src="${vid.video_url}" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>
-          </div>
-        `).join('')}
+            </div>
+          `).join('')}
+        </div>
       </div>
-    </div>
   `;
 }).join('');
     // Attach listeners to all media tiles
     document.querySelectorAll('.media-tile').forEach(tile => {
-      tile.addEventListener('click', () => toggleSelection(tile)); // Combined toggle logic
+      tile.addEventListener('click', () => toggleMedia(tile)); // Combined toggle logic
       
       const animateBtn = tile.querySelector('[data-role="animate"]');
       if (animateBtn) {
@@ -572,24 +589,27 @@ async function loadMedia() {
         });
       }
       
+      // Delete button listener (works for both images and videos)
       const deleteBtn = tile.querySelector('[data-role="delete"]');
       if (deleteBtn) {
         deleteBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          deleteImage(tile);
+          deleteImage(tile); // Ensure deleteImage handles both image_id and video_id
         });
       }
     });
 
     renderSelectionState();
   } catch (err) {
-    console.error(err);
-    selectView.innerHTML = '<div class="empty-state">Error loading media.</div>';
+    console.error("Error loading media:", err);
+    selectView.innerHTML = '<div class="empty-state">Error loading content.</div>';
   }
-}
-// ─── Selection logic ─────────────────────────────────────
-function toggleImage(tile) {
+}// ─── Selection logic ─────────────────────────────────────
+function toggleMedia(tile) {
+  console.log(tile)
+  if(tile.imageId) {}
   const imageId = tile.dataset.imageId;
+  const isImage = tile.dataset.isImage == "true"
   const existingIndex = state.selected.findIndex(s => s.media_type === 'IMAGE' && s.image_id == imageId);
 
   if (existingIndex >= 0) {
@@ -600,7 +620,7 @@ function toggleImage(tile) {
       return;
     }
     state.selected.push({
-      media_type: 'IMAGE',
+      media_type: isImage ? 'IMAGE' : 'VIDEO',
       image_id: imageId,
       product_id: tile.dataset.productId,
       image_url: tile.dataset.imageUrl,
