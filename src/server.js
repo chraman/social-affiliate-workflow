@@ -2,7 +2,16 @@ const express = require('express');
 const { Pool } = require('pg');
 const axios = require('axios');
 const cloudinary = require('cloudinary').v2;
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+const fs = require('fs');
+const fsp = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
 require('dotenv').config();
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -93,6 +102,127 @@ async function startImageToVideo(imageUrl, userPrompt) {
   return res.data.id;
 }
 
+// ─── Combine arbitrary clips (images + videos) into one video ────────────
+// Runs locally via ffmpeg (ffmpeg-static bundles the binary, no system
+// install needed) instead of chaining Cloudinary URL transformations —
+// simpler to reason about for an arbitrary, user-picked list of clips.
+const COMBINE_WIDTH = Number(process.env.COMBINE_WIDTH || 1080);
+const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1350);
+const COMBINE_FPS = Number(process.env.COMBINE_FPS || 30);
+const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS || 3);
+
+async function downloadToFile(url, destPath) {
+  const writer = fs.createWriteStream(destPath);
+  const response = await axios.get(url, { responseType: 'stream' });
+  response.data.pipe(writer);
+  return new Promise((resolve, reject) => {
+    writer.on('finish', resolve);
+    writer.on('error', reject);
+  });
+}
+
+function probeDuration(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err) return reject(err);
+      resolve(data.format.duration);
+    });
+  });
+}
+
+// Scales/pads every clip to the same size+fps (required for xfade), then
+// chains a cross-fade between each consecutive pair. Works the same way
+// whether there are 2 clips or 8 — no manual layer nesting.
+function buildScaleAndXfadeFilter(clips, transitionDuration) {
+  const scaleParts = clips.map((c, i) =>
+    `[${i}:v]scale=${COMBINE_WIDTH}:${COMBINE_HEIGHT}:force_original_aspect_ratio=decrease,` +
+    `pad=${COMBINE_WIDTH}:${COMBINE_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${COMBINE_FPS}[s${i}]`
+  );
+
+  const xfadeParts = [];
+  let lastLabel = 's0';
+  let cumulative = clips[0].duration;
+  for (let i = 1; i < clips.length; i++) {
+    const outLabel = i === clips.length - 1 ? 'vout' : `x${i}`;
+    // each transition eats `transitionDuration` seconds from the running total
+    const offset = Math.max(cumulative - transitionDuration, 0.1);
+    xfadeParts.push(
+      `[${lastLabel}][s${i}]xfade=transition=fade:duration=${transitionDuration}:offset=${offset.toFixed(2)}[${outLabel}]`
+    );
+    lastLabel = outLabel;
+    cumulative = offset + clips[i].duration;
+  }
+
+  return { filter: [...scaleParts, ...xfadeParts].join(';'), outputLabel: lastLabel };
+}
+
+// Runs in the background — the caller responds immediately and the frontend
+// polls /api/videos for the status flip, same pattern as Magic Hour jobs.
+async function runCombineJob(videoRowId, items, transitionDuration) {
+  const jobDir = path.join(os.tmpdir(), `combine_${videoRowId}_${crypto.randomBytes(4).toString('hex')}`);
+  await fsp.mkdir(jobDir, { recursive: true });
+
+  try {
+    const clips = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const ext = item.media_type === 'VIDEO' ? 'mp4' : 'jpg';
+      const localPath = path.join(jobDir, `in_${i}.${ext}`);
+      await downloadToFile(item.image_url, localPath);
+      const duration = item.media_type === 'VIDEO'
+        ? await probeDuration(localPath)
+        : Number(item.duration || COMBINE_IMAGE_HOLD_SECONDS);
+      clips.push({ path: localPath, media_type: item.media_type, duration });
+    }
+
+    const { filter, outputLabel } = buildScaleAndXfadeFilter(clips, transitionDuration);
+    const outputPath = path.join(jobDir, 'output.mp4');
+
+    await new Promise((resolve, reject) => {
+      const cmd = ffmpeg();
+      clips.forEach(c => {
+        if (c.media_type === 'IMAGE') {
+          cmd.input(c.path).inputOptions(['-loop 1', `-t ${c.duration}`]);
+        } else {
+          cmd.input(c.path);
+        }
+      });
+      cmd
+        .complexFilter(filter, outputLabel)
+        // audio is dropped for simplicity — fine for silent AI-generated motion
+        // clips, but flag it if you start combining clips that have real audio
+        .outputOptions(['-an', '-c:v libx264', '-pix_fmt yuv420p', '-movflags +faststart'])
+        .output(outputPath)
+        .on('error', reject)
+        .on('end', resolve)
+        .run();
+    });
+
+    // Upload into the same Cloudinary folder as the first source clip
+    const folder = getFolderFromCloudinaryUrl(items[0].image_url);
+    const uploadResult = await cloudinary.uploader.upload(outputPath, {
+      resource_type: 'video',
+      folder: folder || undefined,
+      public_id: `combined_${videoRowId}`,
+      overwrite: false
+    });
+
+    await pool.query(
+      `UPDATE product_videos SET status = 'ready', video_url = $1, cloudinary_public_id = $2, updated_at = NOW() WHERE id = $3`,
+      [uploadResult.secure_url, uploadResult.public_id, videoRowId]
+    );
+    console.log(`✅ Combined video #${videoRowId} ready → ${uploadResult.secure_url}`);
+  } catch (err) {
+    console.error(`❌ Combine job #${videoRowId} failed:`, err.message);
+    await pool.query(
+      `UPDATE product_videos SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2`,
+      [err.message, videoRowId]
+    );
+  } finally {
+    fsp.rm(jobDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // ─── Get all categories that have images available ───────────────────────
 app.get('/api/categories', async (req, res) => {
   try {
@@ -155,7 +285,7 @@ app.get('/api/images', async (req, res) => {
   }
 });
 
-app.get('/api/videos', async (req, res) => {
+app.get('/api/videos/grouped', async (req, res) => {
   const { category } = req.query;
   try {
     const result = await pool.query(`
@@ -274,14 +404,44 @@ app.post('/api/videos/generate', async (req, res) => {
   try {
     const projectId = await startImageToVideo(image_url, prompt);
     const insertRes = await pool.query(
-      `INSERT INTO product_videos (product_id, source_image_id, source_image_url, magic_hour_project_id, status, prompt)
-       VALUES ($1, $2, $3, $4, 'processing', $5) RETURNING id`,
+      `INSERT INTO product_videos (product_id, source_image_id, source_image_url, magic_hour_project_id, status, prompt, product_ids)
+       VALUES ($1, $2, $3, $4, 'processing', $5, ARRAY[$1]::integer[]) RETURNING id`,
       [product_id, image_id, image_url, projectId, prompt || null]
     );
     res.json({ ok: true, video_id: insertRes.rows[0].id, magic_hour_project_id: projectId });
   } catch (err) {
     console.error('Magic Hour start error:', err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// ─── Combine an ordered list of picked images/videos into one video ──────
+app.post('/api/videos/combine', async (req, res) => {
+  const { items, transition_duration } = req.body;
+  // items: [{ media_type: 'IMAGE'|'VIDEO', image_url, product_id, duration? }] in play order
+
+  if (!items || items.length < 2) {
+    return res.status(400).json({ error: 'Pick at least 2 clips to combine' });
+  }
+  const transitionDuration = Number(transition_duration) > 0 ? Number(transition_duration) : 1;
+  // every distinct product represented in the clips being combined, in first-seen order
+  const productIds = [...new Set(items.map(i => i.product_id).filter(Boolean))];
+
+  try {
+    const insertRes = await pool.query(
+      `INSERT INTO product_videos (product_id, source_image_url, status, source_type, source_items, product_ids)
+       VALUES ($1, $2, 'processing', 'combined', $3, $4) RETURNING id`,
+      [productIds[0] || null, items[0].image_url, JSON.stringify(items), productIds]
+    );
+    const videoRowId = insertRes.rows[0].id;
+
+    // respond immediately — the frontend polls /api/videos for the status flip
+    res.json({ ok: true, video_id: videoRowId });
+
+    runCombineJob(videoRowId, items, transitionDuration);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -361,11 +521,38 @@ app.post('/api/queue', async (req, res) => {
 
     for (const item of items) {
       const isVideo = item.media_type === 'VIDEO';
-      await client.query(
+      const insertItemRes = await client.query(
         `INSERT INTO post_queue_items (post_queue_id, product_id, image_id, video_id, position, media_type)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [postQueueId, item.product_id, isVideo ? null : item.image_id, isVideo ? item.video_id : null, item.position, item.media_type || 'IMAGE']
       );
+      const queueItemId = insertItemRes.rows[0].id;
+
+      // A video item may represent several products (a combined video);
+      // an image item always represents exactly one. Either way, every
+      // product this item should give out a link for goes into this table —
+      // it's what the IG webhook reads from when someone asks "link".
+      let productIdsForItem = [item.product_id].filter(Boolean);
+      if (isVideo && item.video_id) {
+        const vidRes = await client.query(
+          `SELECT product_ids, product_id FROM product_videos WHERE id = $1`,
+          [item.video_id]
+        );
+        if (vidRes.rows.length > 0) {
+          const row = vidRes.rows[0];
+          productIdsForItem = (row.product_ids && row.product_ids.length > 0)
+            ? row.product_ids
+            : [row.product_id].filter(Boolean);
+        }
+      }
+
+      let displayOrder = 1;
+      for (const pid of productIdsForItem) {
+        await client.query(
+          `INSERT INTO post_queue_item_products (post_queue_item_id, product_id, display_order) VALUES ($1, $2, $3)`,
+          [queueItemId, pid, displayOrder++]
+        );
+      }
     }
 
     await client.query('COMMIT');

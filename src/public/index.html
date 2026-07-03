@@ -397,6 +397,7 @@
   </div>
   <div class="selected-strip" id="selectedStrip"></div>
   <button class="btn full" id="openCaptionModal" style="margin-top:10px;">Continue →</button>
+  <button class="btn secondary full" id="combineBtn" style="margin-top:8px;">🎞 Combine into one video</button>
 </div>
 
 <div class="modal-backdrop" id="modalBackdrop">
@@ -480,7 +481,7 @@ async function fetchCombinedMedia(category) {
   // Use Promise.all to fetch both in parallel
   const [imagesRes, videosRes] = await Promise.all([
     fetch(`/api/images?category=${encodedCategory}`),
-    fetch(`/api/videos?category=${encodedCategory}`)
+    fetch(`/api/videos/grouped?category=${encodedCategory}`)
   ]);
 
   // Parse the JSON responses
@@ -610,7 +611,8 @@ function toggleMedia(tile) {
   if(tile.imageId) {}
   const imageId = tile.dataset.imageId;
   const isImage = tile.dataset.isImage == "true"
-  const existingIndex = state.selected.findIndex(s => s.media_type === 'IMAGE' && s.image_id == imageId);
+    const mediaType=isImage?'IMAGE':'VIDEO';
+  const existingIndex = state.selected.findIndex(s => s.media_type===mediaType && (isImage ? s.image_id==imageId : s.image_id==imageId));
 
   if (existingIndex >= 0) {
     state.selected.splice(existingIndex, 1);
@@ -634,7 +636,7 @@ function renderSelectionState() {
   // update tile UI (images only — videos live in a separate tab/list)
   document.querySelectorAll('.image-tile').forEach(tile => {
     const imageId = tile.dataset.imageId;
-    const idx = state.selected.findIndex(s => s.media_type === 'IMAGE' && s.image_id == imageId);
+    const idx = state.selected.findIndex(s => s.image_id == imageId);
     tile.classList.toggle('selected', idx >= 0);
     const existingBadge = tile.querySelector('.pos-badge');
     if (existingBadge) existingBadge.remove();
@@ -667,6 +669,56 @@ document.getElementById('clearSelection').addEventListener('click', () => {
   state.selected = [];
   renderSelectionState();
 });
+
+// ─── Combine selected clips (arbitrary images/videos, in selection order) ──
+document.getElementById('combineBtn').addEventListener('click', combineSelected);
+
+async function combineSelected() {
+  if (state.selected.length < 2) {
+    alert('Pick at least 2 images/videos (in the order you want them to play) first.');
+    return;
+  }
+
+  const transitionInput = prompt('Transition duration between clips, in seconds:', '1');
+  if (transitionInput === null) return; // cancelled
+  const transitionDuration = Number(transitionInput) || 1;
+
+  const items = state.selected.map(s => ({
+    media_type: s.media_type || 'IMAGE',
+    image_url: s.image_url,
+    product_id: s.product_id
+    // images hold for a fixed default (COMBINE_IMAGE_HOLD_SECONDS on the server);
+    // bump this up with a per-item `duration` field later if you want per-clip control
+  }));
+
+  const combineBtn = document.getElementById('combineBtn');
+  const originalText = combineBtn.textContent;
+  combineBtn.textContent = 'Starting…';
+  combineBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/videos/combine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, transition_duration: transitionDuration })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert('Combining started! This can take a minute or two — it\'ll show up as a new video once ready.');
+      state.selected = [];
+      renderSelectionState();
+      if (typeof loadMedia === 'function') loadMedia();
+      else if (typeof loadImages === 'function') loadImages();
+    } else {
+      alert('Failed to start combining: ' + (data.error || 'unknown error'));
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    combineBtn.textContent = originalText;
+    combineBtn.disabled = false;
+  }
+}
 
 // ─── Delete image ────────────────────────────────────────
 async function deleteImage(tile) {

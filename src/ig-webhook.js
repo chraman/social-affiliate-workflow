@@ -56,14 +56,17 @@ app.get('/webhook', (req, res) => {
 });
 
 // ─── Look up affiliate link(s) for a given IG media id ─────────────────────
+// Reads through post_queue_item_products rather than post_queue_items.product_id
+// directly, since one item (e.g. a combined video) can now represent several products.
 async function getAffiliateLinksForMedia(igMediaId) {
   const result = await pool.query(`
-    SELECT pqi.position, p.outfit_name, p.affiliate_link
+    SELECT pqi.position, pqip.display_order, p.outfit_name, p.affiliate_link
     FROM post_queue pq
     JOIN post_queue_items pqi ON pqi.post_queue_id = pq.id
-    JOIN products p ON p.id = pqi.product_id
+    JOIN post_queue_item_products pqip ON pqip.post_queue_item_id = pqi.id
+    JOIN products p ON p.id = pqip.product_id
     WHERE pq.ig_media_id = $1
-    ORDER BY pqi.position ASC
+    ORDER BY pqi.position ASC, pqip.display_order ASC
   `, [igMediaId]);
   return result.rows;
 }
@@ -72,11 +75,38 @@ function formatLinkReply(items) {
   if (items.length === 0) {
     return "Sorry, couldn't find the link for this one! Drop a message and I'll send it manually 🙏";
   }
-  if (items.length === 1) {
-    return `Here's the link 🛍️\n${items[0].affiliate_link}`;
+
+  // group rows by carousel position — a single position (e.g. one combined
+  // video slot) can now carry more than one product/link
+  const byPosition = new Map();
+  for (const row of items) {
+    if (!byPosition.has(row.position)) byPosition.set(row.position, []);
+    byPosition.get(row.position).push(row);
   }
-  return items
-    .map(i => `${i.position}. ${i.outfit_name}\n${i.affiliate_link}`)
+  const positions = [...byPosition.keys()].sort((a, b) => a - b);
+
+  // single post item overall (no carousel) — just list its product(s) directly
+  if (positions.length === 1) {
+    const products = byPosition.get(positions[0]);
+    if (products.length === 1) {
+      return `Here's the link 🛍️\n${products[0].affiliate_link}`;
+    }
+    return products
+      .map((p, i) => `${i + 1}. ${p.outfit_name}\n${p.affiliate_link}`)
+      .join('\n\n');
+  }
+
+  // multi-item carousel — one numbered line per position; a position that's
+  // itself a multi-product combined video lists its products underneath
+  return positions
+    .map(pos => {
+      const products = byPosition.get(pos);
+      if (products.length === 1) {
+        return `${pos}. ${products[0].outfit_name}\n${products[0].affiliate_link}`;
+      }
+      return `${pos}. ${products.map(p => p.outfit_name).join(' + ')}\n` +
+        products.map(p => p.affiliate_link).join('\n');
+    })
     .join('\n\n');
 }
 
@@ -140,12 +170,13 @@ console.log(req,res)
           // Without a referenced post, we don't know which product they mean —
           // fall back to most recently posted item, or ask them to specify.
           const recent = await pool.query(`
-            SELECT pqi.position, p.outfit_name, p.affiliate_link
+            SELECT pqi.position, pqip.display_order, p.outfit_name, p.affiliate_link
             FROM post_queue pq
             JOIN post_queue_items pqi ON pqi.post_queue_id = pq.id
-            JOIN products p ON p.id = pqi.product_id
+            JOIN post_queue_item_products pqip ON pqip.post_queue_item_id = pqi.id
+            JOIN products p ON p.id = pqip.product_id
             WHERE pq.status = 'posted'
-            ORDER BY pq.posted_at DESC
+            ORDER BY pq.posted_at DESC, pqi.position ASC, pqip.display_order ASC
             LIMIT 5
           `);
           const reply = formatLinkReply(recent.rows);

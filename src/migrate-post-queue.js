@@ -2,38 +2,41 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const { Client } = require('pg');
 
-async function migrate() {
-  await pool.query(`
-    UPDATE product_videos 
-SET status = 'processing', 
-    error_message = NULL, 
-    created_at = NOW() 
-WHERE status = 'failed'
-  `);
-  console.log('Migration applied — post_queue updated for multi-product carousels');
-  await pool.end();
-}
-async function checkTime() {
-  const result = await pool.query(`
-    SELECT id, created_at, NOW() as current_db_time, (NOW() - created_at) as age_interval 
-    FROM product_videos 
-    WHERE status = 'failed' 
-    ORDER BY created_at DESC 
-    LIMIT 1;
-  `);
-  
-  // result.rows is an array of your returned rows
-  if (result.rows.length > 0) {
-    console.log('--- Database Time Check ---');
-    console.log(result.rows[0]);
-  } else {
-    console.log('No pending jobs found to check time.');
+async function runMigration() {
+  const client = new Client({
+    connectionString: process.env.DATABASE_URL, // Ensure this is set
+  });
+
+  const sql = `
+    -- Adds support for "combine picked clips into one video"
+    ALTER TABLE product_videos 
+    ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'magic_hour'; 
+
+    ALTER TABLE product_videos 
+    ADD COLUMN IF NOT EXISTS source_items JSONB;
+
+    -- Ensure these columns are nullable
+    ALTER TABLE product_videos 
+    ALTER COLUMN magic_hour_project_id DROP NOT NULL;
+    
+    ALTER TABLE product_videos 
+    ALTER COLUMN source_image_id DROP NOT NULL;
+  `;
+
+  try {
+    await client.connect();
+    console.log('Connected to database. Running migration...');
+    
+    await client.query(sql);
+    
+    console.log('Migration completed successfully.');
+  } catch (err) {
+    console.error('Migration failed:', err.stack);
+  } finally {
+    await client.end();
   }
-
-  console.log('Migration applied — post_queue updated for multi-product carousels');
-  await pool.end();
 }
-// checkTime()
-migrate();
+
+runMigration();
