@@ -6,22 +6,34 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function migrate() {
   await pool.query(`
-    ALTER TABLE post_queue DROP COLUMN IF EXISTS product_id;
-
-    CREATE TABLE IF NOT EXISTS post_queue_items (
-      id SERIAL PRIMARY KEY,
-      post_queue_id INTEGER REFERENCES post_queue(id) ON DELETE CASCADE,
-      product_id INTEGER REFERENCES products(id),
-      image_id INTEGER REFERENCES product_images(id),
-      position INTEGER,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_post_queue_items_post_queue_id ON post_queue_items(post_queue_id);
-    CREATE INDEX IF NOT EXISTS idx_post_queue_items_product_id ON post_queue_items(product_id);
+    UPDATE product_videos 
+SET status = 'processing', 
+    error_message = NULL, 
+    created_at = NOW() 
+WHERE status = 'failed'
   `);
   console.log('Migration applied — post_queue updated for multi-product carousels');
   await pool.end();
 }
+async function checkTime() {
+  const result = await pool.query(`
+    SELECT id, created_at, NOW() as current_db_time, (NOW() - created_at) as age_interval 
+    FROM product_videos 
+    WHERE status = 'failed' 
+    ORDER BY created_at DESC 
+    LIMIT 1;
+  `);
+  
+  // result.rows is an array of your returned rows
+  if (result.rows.length > 0) {
+    console.log('--- Database Time Check ---');
+    console.log(result.rows[0]);
+  } else {
+    console.log('No pending jobs found to check time.');
+  }
 
+  console.log('Migration applied — post_queue updated for multi-product carousels');
+  await pool.end();
+}
+// checkTime()
 migrate();

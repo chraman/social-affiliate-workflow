@@ -38,12 +38,25 @@ const GRAPH_API = 'https://graph.facebook.com/v25.0';
 
 async function createMediaContainer(imageUrl, isCarouselItem) {
   const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media`, {
-        image_url: imageUrl
+        image_url: imageUrl,
+        is_carousel_item: !!isCarouselItem
     }, {
         headers: {
         'Authorization': `Bearer ${IG_TOKEN}`
         }
     });
+  return res.data.id;
+}
+
+// Video items inside a carousel need media_type: VIDEO + is_carousel_item: true
+async function createVideoChildContainer(videoUrl) {
+  const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media`, {
+    media_type: 'VIDEO',
+    video_url: videoUrl,
+    is_carousel_item: true
+  }, {
+    headers: { 'Authorization': `Bearer ${IG_TOKEN}` }
+  });
   return res.data.id;
 }
 
@@ -72,6 +85,34 @@ async function createSingleContainer(imageUrl, caption) {
   return res.data.id;
 }
 
+// Standalone video post = Reels on IG's current API
+async function createReelsContainer(videoUrl, caption) {
+  const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media`, {
+    media_type: 'REELS',
+    video_url: videoUrl,
+    caption: caption
+  }, {
+    headers: { 'Authorization': `Bearer ${IG_TOKEN}` }
+  });
+  return res.data.id;
+}
+
+// Video containers (Reels or carousel video children) process asynchronously on
+// Meta's side — poll status_code until FINISHED before it can be published/used
+// as a carousel child. Image containers don't need this.
+async function pollContainerReady(creationId, maxAttempts = 20, intervalMs = 5000) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await axios.get(`${GRAPH_API}/${creationId}`, {
+      params: { fields: 'status_code', access_token: IG_TOKEN }
+    });
+    const status = res.data.status_code;
+    if (status === 'FINISHED') return true;
+    if (status === 'ERROR') throw new Error(`Container ${creationId} processing failed (status ERROR)`);
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Container ${creationId} not ready after ${maxAttempts * intervalMs / 1000}s — try again later`);
+}
+
 async function publishContainer(creationId) {
   const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media_publish`, { creation_id: creationId }, {
     headers: {
@@ -81,16 +122,29 @@ async function publishContainer(creationId) {
   return res.data.id; // published media id
 }
 
-async function postToInstagram(imageUrls, caption) {
+// items: [{ url, media_type: 'IMAGE' | 'VIDEO' }]
+async function postToInstagram(items, caption) {
   let creationId;
 
-  if (imageUrls.length === 1) {
-    creationId = await createSingleContainer(imageUrls[0], caption);
+  if (items.length === 1) {
+    const item = items[0];
+    if (item.media_type === 'VIDEO') {
+      creationId = await createReelsContainer(item.url, caption);
+      await pollContainerReady(creationId);
+    } else {
+      creationId = await createSingleContainer(item.url, caption);
+    }
   } else {
     const childIds = [];
-    for (const url of imageUrls) {
-      const childId = await createMediaContainer(url, true);
-      childIds.push(childId);
+    for (const item of items) {
+      if (item.media_type === 'VIDEO') {
+        const childId = await createVideoChildContainer(item.url);
+        await pollContainerReady(childId);
+        childIds.push(childId);
+      } else {
+        const childId = await createMediaContainer(item.url, true);
+        childIds.push(childId);
+      }
     }
     creationId = await createCarouselContainer(childIds, caption);
   }
@@ -112,9 +166,35 @@ async function processQueue() {
   }
 
   for (const post of due.rows) {
-    console.log(`[${new Date().toLocaleTimeString()}] Publishing post #${post.id} (${post.image_urls.length} image(s))...`);
+    let items;
     try {
-      const mediaId = await postToInstagram(post.image_urls, post.caption);
+      const itemsRes = await pool.query(
+        `SELECT pqi.position, pqi.media_type, pi.image_url AS img_url, pv.video_url
+         FROM post_queue_items pqi
+         LEFT JOIN product_images pi ON pi.id = pqi.image_id
+         LEFT JOIN product_videos pv ON pv.id = pqi.video_id
+         WHERE pqi.post_queue_id = $1
+         ORDER BY pqi.position ASC`,
+        [post.id]
+      );
+      if (itemsRes.rows.length > 0) {
+        items = itemsRes.rows.map(r => ({
+          url: r.media_type === 'VIDEO' ? r.video_url : r.img_url,
+          media_type: r.media_type || 'IMAGE'
+        })).filter(i => !!i.url);
+      }
+    } catch (e) {
+      // pre-migration DB without post_queue_items.media_type / video_id — fall back below
+      console.error('Could not read post_queue_items media_type, falling back to image_urls:', e.message);
+    }
+
+    if (!items || items.length === 0) {
+      items = (post.image_urls || []).map(u => ({ url: u, media_type: 'IMAGE' }));
+    }
+
+    console.log(`[${new Date().toLocaleTimeString()}] Publishing post #${post.id} (${items.length} item(s), ${items.some(i => i.media_type === 'VIDEO') ? 'contains video' : 'images only'})...`);
+    try {
+      const mediaId = await postToInstagram(items, post.caption);
 
       await pool.query(
         `UPDATE post_queue SET status = 'posted', posted_at = NOW(), ig_media_id = $1 WHERE id = $2`,

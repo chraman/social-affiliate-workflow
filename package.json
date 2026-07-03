@@ -9,7 +9,13 @@
     "scrape-test": "node src/scraper-test.js",
     "clear-wa": "rmdir /s /q .wwebjs_auth",
     "start-server": "node src/server.js",
-    "start-workers": "pm2 start src/ig-worker.js --name ig-worker && pm2 start src/ig-webhook.js --name ig-webhook && pm2 logs ig-worker"
+    "dev-server": "nodemon src/server.js",
+    "start-workers": "pm2 start src/ig-worker.js --name ig-worker && pm2 start src/ig-webhook.js --name ig-webhook && pm2 start src/videoWorker.js --name videoWorker",
+    "stop-workers": "pm2 stop ig-worker && pm2 stop ig-webhook && pm2 stop videoWorker",
+    "log-ig-worker": "pm2 logs ig-worker",
+    "log-ig-webhook": "pm2 logs ig-webhook",
+    "log-videoWorker": "pm2 logs videoWorker"
+
   },
   "dependencies": {
     "axios": "^1.18.1",
