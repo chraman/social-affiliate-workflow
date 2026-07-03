@@ -99,8 +99,9 @@ async function startImageToVideo(imageUrl, userPrompt) {
 }
 
 // ─── FFmpeg Video Combiner Config & Logic ───────────────────────
+// 1. Updated defaults to standard 9:16 Reels format (1080x1920)
 const COMBINE_WIDTH = Number(process.env.COMBINE_WIDTH || 1080);
-const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1350);
+const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1920);
 const COMBINE_FPS = Number(process.env.COMBINE_FPS || 30);
 const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS || 3);
 
@@ -118,8 +119,6 @@ async function runCombineJob(videoRowId, items) {
     if (baseVideoIndex !== -1) {
       basePublicId = getPublicIdFromCloudinaryUrl(items[baseVideoIndex].image_url);
     } else {
-      // Fallback: if there are no videos at all, use a standard base asset, 
-      // splice everything onto it, and trim it out at the end.
       basePublicId = 'samples/sea-turtle'; 
       isOnlyImages = true;
     }
@@ -128,16 +127,22 @@ async function runCombineJob(videoRowId, items) {
       throw new Error("Could not determine base asset public ID from Cloudinary URL.");
     }
 
-    // Initialize the canvas transformation layout (1080x1350 portrait)
-    const transformation = [
-      { width: 1080, height: 1350, crop: 'fill' }
-    ];
+    // Shared layout configuration applied to every canvas state
+    const canvasLayout = { 
+      width: COMBINE_WIDTH, 
+      height: COMBINE_HEIGHT, 
+      crop: 'fill', 
+      fps: COMBINE_FPS 
+    };
+
+    // Initialize canvas transformation layout
+    const transformation = [ canvasLayout ];
 
     // Snappy fast transition speed (0.3 seconds)
     const fastTransition = 'transition_(name_fade;du_0.3)';
 
     if (isOnlyImages) {
-      // Scenario A: Only images exist. Append all items with zoompan sequence.
+      // Scenario A: Only images exist.
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
@@ -147,17 +152,16 @@ async function runCombineJob(videoRowId, items) {
         transformation.push({
           overlay: formattedId,
           flags: `splice:${fastTransition}`,
-          duration: 3,            // Hold images for exactly 3 seconds
-          effect: 'zoompan'       // Add dynamic smooth zoom-in motion
+          duration: COMBINE_IMAGE_HOLD_SECONDS, // Used config variable
+          effect: 'zoompan'
         });
-        transformation.push({ width: 1080, height: 1350, crop: 'fill' });
+        transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply' });
       }
-      // Trim off the 15-second sample turtle base video completely
       transformation.push({ start_offset: 15.0 });
     } else {
       // Scenario B: Mixed media.
-      // 1. Prepend assets that sit BEFORE our base video clip (moving backward)
+      // 1. Prepend assets
       for (let i = baseVideoIndex - 1; i >= 0; i--) {
         const item = items[i];
         const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
@@ -169,13 +173,13 @@ async function runCombineJob(videoRowId, items) {
         transformation.push({
           overlay: isVideo ? `video:${formattedId}` : formattedId,
           flags: `splice:${fastTransition}`,
-          ...(isVideo ? {} : { duration: 3, effect: 'zoompan' }) // No duration for videos, let them play naturally
+          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan' })
         });
-        transformation.push({ width: 1080, height: 1350, crop: 'fill' });
-        transformation.push({ flags: 'layer_apply', start_offset: 0 }); // start_offset 0 forces prepend
+        transformation.push(canvasLayout);
+        transformation.push({ flags: 'layer_apply', start_offset: 0 });
       }
 
-      // 2. Append assets that sit AFTER our base video clip (moving forward)
+      // 2. Append assets
       for (let i = baseVideoIndex + 1; i < items.length; i++) {
         const item = items[i];
         const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
@@ -187,15 +191,19 @@ async function runCombineJob(videoRowId, items) {
         transformation.push({
           overlay: isVideo ? `video:${formattedId}` : formattedId,
           flags: `splice:${fastTransition}`,
-          ...(isVideo ? {} : { duration: 3, effect: 'zoompan' }) // No duration for videos, let them play naturally
+          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan' })
         });
-        transformation.push({ width: 1080, height: 1350, crop: 'fill' });
+        transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply' });
       }
     }
 
-    // Force high-efficiency compression properties on the final stitched timeline
-    transformation.push({ quality: 'auto', fetch_format: 'auto' });
+    // 2. FORCED INSTAGRAM COMPLIANCE: Lock down video/audio codecs and quality
+    transformation.push({ 
+      video_codec: 'h264', 
+      audio_codec: 'aac', 
+      quality: 'auto' 
+    });
 
     // Build the dynamic manipulation URL
     const sourceUrl = cloudinary.url(basePublicId, {
@@ -203,10 +211,11 @@ async function runCombineJob(videoRowId, items) {
       transformation: transformation
     });
 
-    // Upload the Cloudinary generation URL back into an explicit static video asset
+    // 3. FORCED EXTENSION: Explicitly save target as an MP4 file
     const folder = getFolderFromCloudinaryUrl(items[0].image_url);
     const uploadResult = await cloudinary.uploader.upload(sourceUrl, {
       resource_type: 'video',
+      format: 'mp4', 
       folder: folder || undefined,
       public_id: `combined_${videoRowId}`,
       overwrite: true
@@ -217,7 +226,7 @@ async function runCombineJob(videoRowId, items) {
       `UPDATE product_videos SET status = 'ready', video_url = $1, cloudinary_public_id = $2, updated_at = NOW() WHERE id = $3`,
       [uploadResult.secure_url, uploadResult.public_id, videoRowId]
     );
-    console.log(`✅ Combined video #${videoRowId} ready via Cloudinary Cloud API → ${uploadResult.secure_url}`);
+    console.log(`✅ Combined video #${videoRowId} ready for Instagram Reels → ${uploadResult.secure_url}`);
   } catch (err) {
     console.error(`❌ Cloudinary Combine job #${videoRowId} failed:`, err.message);
     await pool.query(
