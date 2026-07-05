@@ -17,6 +17,7 @@
     "log-videoWorker": "pm2 logs videoWorker"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "axios": "^1.18.1",
     "cloudinary": "^2.10.0",
     "dotenv": "^16.6.1",
@@ -31,7 +32,7 @@
     "pm2": "^7.0.3",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "qrcode-terminal": "^0.12.0",
-    "sharp": "^0.35.2",
+    "sharp": "^0.35.3",
     "whatsapp-web.js": "^1.23.0"
   },
   "devDependencies": {

@@ -1,7 +1,9 @@
 const axios = require('axios');
 const Redis = require('ioredis');
 const path = require('path');
+const { analyzeProductWithGemini, generateImageWithFlux } = require('./generate-product-image')
 require('dotenv').config();
+const fs = require("fs");
 
 const REDIS_URL = process.env.REDIS_URL;
 const VISIONCRAFT_URL = process.env.VISIONCRAFT_URL;
@@ -129,6 +131,15 @@ async function describeProductImage(imageUrl) {
   }
 }
 
+async function uploadGeneratedImage(buffer, { filename = `generated-${Date.now()}.png`, contentType = "image/png" } = {}) {
+  console.log("→ Requesting presigned upload URL...");
+  const { uploadUrl, key } = await getUploadUrl(filename, contentType);
+  console.log("→ Uploading generated image to storage...");
+  await uploadImageBufferToStorage(uploadUrl, buffer, contentType);
+ 
+  return { uploadUrl : uploadUrl, key: key };
+}
+
 // ─── Step 3a: Get presigned upload URL ───────────────────────────────────────
 async function getUploadUrl(imageUrl) {
   const filename = path.basename(imageUrl.split('?')[0]) || 'product.jpeg';
@@ -147,6 +158,18 @@ async function uploadImageToStorage(uploadUrl, imageUrl) {
     headers: {
       'Content-Type': contentType,
       'Content-Length': buffer.length,
+    },
+    timeout: 30000,
+    maxBodyLength: Infinity,
+  });
+}
+
+// Step 3b: Upload the generated image buffer to the presigned URL
+async function uploadImageBufferToStorage(uploadUrl, buffer, contentType = "image/png") {
+  await axios.put(uploadUrl, buffer, {
+    headers: {
+      "Content-Type": contentType,
+      "Content-Length": buffer.length,
     },
     timeout: 30000,
     maxBodyLength: Infinity,
@@ -175,13 +198,13 @@ async function generateInfluencerImage(productImageUrl) {
   try {
     // Step 1: Describe the product scene first
     console.log('🔍 Describing product scene...');
-    const sceneDescription = await describeProductImage(productImageUrl);
+    const productDescription = await analyzeProductWithGemini(productImageUrl);
 
-    if (!sceneDescription) {
-      throw new Error('Could not generate scene description');
+    if (!productDescription) {
+      throw new Error('Could not generate product description');
     }
 
-    console.log('📝 Scene description:', sceneDescription);
+    console.log('📝 Product description:', productDescription);
 
     console.log('📤 Getting upload URL...');
     const { uploadUrl, key } = await getUploadUrl(productImageUrl);
@@ -191,14 +214,27 @@ async function generateInfluencerImage(productImageUrl) {
 
     // Subscribe BEFORE triggering — avoids race condition where
     // job completes before we subscribe
-    console.log('🎨 Triggering influencer generation...');
-    const jobId = await triggerInfluencerGeneration(key, sceneDescription);
-    console.log(`🆔 Job ID: ${jobId}`);
+    console.log('🎨 Triggering AI template + Product generation...');
+    let templateImageUrl = "http://localhost:9000/dev-ai-images-uploads/uploads/c84d9dce-4aec-4a16-bf66-7a830873ccd6.png"
+    let prompt = 
+      `A stylish woman stands poised in a modern, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, footwear and overall composition in every generation.
+      Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
+      PRODUCT SPECIFICATION:
+ 
+      ${productDescription}`
+    // Accesseries, jewelry and footware should be based on the prodct category
+    const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
+    // console.log(`🆔 Job ID: ${jobId}`);
 
-    console.log('⏳ Waiting for result via Redis pub/sub...');
-    const resultUrl = await waitForJob(jobId);
-
-    console.log('✅ Influencer image ready:', resultUrl);
+    const outFileName = `generated-${Date.now()}.png`;
+ 
+    console.log("\n→ Step 3: Uploading generated image to storage...");
+    let resultData = await uploadGeneratedImage(imageBuffer, {
+      filename: outFileName,
+      contentType: "image/png",
+    });
+    let resultUrl = process.env.MINIO_UPLOAD_PATH + resultData.key;
+    console.log('✅ Influencer image ready:', resultData.uploadUrl, resultData.key);
     return resultUrl;
   } catch (err) {
     console.error('❌ Influencer generation failed:', err.message);
