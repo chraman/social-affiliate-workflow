@@ -915,11 +915,29 @@ document.getElementById('openCaptionModal').addEventListener('click', () => {
 
   const outfitNames = [...new Set(state.selected.map(s => s.outfit_name).filter(Boolean))];
   if (outfitNames.length > 1) {
-    document.getElementById('captionInput').value = `${outfitNames.length} looks you'll love this week ✨\n\nDM "link" for shopping details 🛍️`;
+    document.getElementById('captionInput').value = `POV: You just found the perfect outfit that makes you feel like a 10/10. ✨ Whether it’s brunch, a date night, or just treating yourself, this look from Myntra is an absolute essential.
+
+Tap the link in my bio to shop this exact look before it sells out! 🛍️
+
+#MyntraFashion #OOTD #AffiliateMarketing #StyleInspo #MyntraFinds #LookOfTheDay
+
+DM "link" for shopping details 🛍️`;
   } else if (outfitNames.length === 1) {
-    document.getElementById('captionInput').value = `${outfitNames[0]} ✨\n\nDM "link" to shop this look 🛍️`;
+    document.getElementById('captionInput').value = `POV: You just found the perfect outfit that makes you feel like a 10/10. ✨ Whether it’s brunch, a date night, or just treating yourself, this look from Myntra is an absolute essential.
+
+Tap the link in my bio to shop this exact look before it sells out! ✨
+
+#MyntraFashion #OOTD #AffiliateMarketing #StyleInspo #MyntraFinds #LookOfTheDay
+
+DM "link" for shopping details 🛍️`;
   } else {
-    document.getElementById('captionInput').value = `New looks ✨\n\nDM "link" to shop 🛍️`;
+    document.getElementById('captionInput').value = `POV: You just found the perfect outfit that makes you feel like a 10/10. ✨ Whether it’s brunch, a date night, or just treating yourself, this look from Myntra is an absolute essential.
+
+Tap the link in my bio to shop this exact look before it sells out! ✨
+
+#MyntraFashion #OOTD #AffiliateMarketing #StyleInspo #MyntraFinds #LookOfTheDay
+
+DM "link" for shopping details 🛍️`;
   }
 
   const defaultTime = new Date();

@@ -29,7 +29,7 @@ const MAGIC_HOUR_API_KEY = process.env.MAGIC_HOUR_API_KEY;
 const MAGIC_HOUR_BASE = 'https://api.magichour.ai/v1';
 const MAGIC_HOUR_MODEL = process.env.MAGIC_HOUR_MODEL || 'ltx-2.3';
 const MAGIC_HOUR_RESOLUTION = process.env.MAGIC_HOUR_RESOLUTION || '720p';
-const MAGIC_HOUR_DURATION_SECONDS = Number(process.env.MAGIC_HOUR_DURATION_SECONDS || 5);
+const MAGIC_HOUR_DURATION_SECONDS = Number(process.env.MAGIC_HOUR_DURATION_SECONDS || 2);
 
 // ─── Basic Auth Setup ────────────────────────────────────────────
 const DASH_USER = process.env.DASH_USER || 'admin';
@@ -87,7 +87,11 @@ async function startImageToVideo(imageUrl, userPrompt) {
     model: MAGIC_HOUR_MODEL,
     resolution: MAGIC_HOUR_RESOLUTION,
     style: {
-      prompt: userPrompt || 'Subtle natural motion, fabric sway, gentle camera drift, no distortion'
+      prompt: `2-second realistic fashion video. Keep the camera completely static. Preserve the exact framing, perspective, lighting, background, outfit, handbag, phone position, and composition. The phone must remain covering the face throughout the video.
+
+The model makes one very small natural step forward, moving only a few centimeters toward the camera while maintaining the same body orientation. The movement is smooth and slow, with a slight transfer of body weight. The handbag swings gently from the motion. The hair moves subtly and settles naturally. The outfit fabric responds with minimal realistic movement.
+
+Do not change the pose, do not rotate the body, do not reveal the face, do not move the phone, do not change the outfit, do not zoom, pan, tilt, crop, or change the camera angle. Maintain identity, body proportions, clothing details, and background exactly.`
     }
   }, {
     headers: {
@@ -103,7 +107,7 @@ async function startImageToVideo(imageUrl, userPrompt) {
 const COMBINE_WIDTH = Number(process.env.COMBINE_WIDTH || 1080);
 const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1920);
 const COMBINE_FPS = Number(process.env.COMBINE_FPS || 30);
-const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS || 3);
+const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS || 2);
 
 async function runCombineJob(videoRowId, items) {
   try {
@@ -118,9 +122,38 @@ async function runCombineJob(videoRowId, items) {
 
     if (baseVideoIndex !== -1) {
       basePublicId = getPublicIdFromCloudinaryUrl(items[baseVideoIndex].image_url);
-    } else {
-      basePublicId = 'samples/sea-turtle'; 
+    } else { 
       isOnlyImages = true;
+        const firstImagePublicId = getPublicIdFromCloudinaryUrl(items[0].image_url);
+        if (!firstImagePublicId) {
+          throw new Error("Could not determine first image public ID.");
+        }
+
+        // Generate a short video from the first image
+        const imageVideoUrl = cloudinary.url(firstImagePublicId, {
+          resource_type: "image",
+          format: "mp4",
+          transformation: [
+            {
+              width: COMBINE_WIDTH,
+              height: COMBINE_HEIGHT,
+              crop: "fill",
+              effect: "zoompan",
+              duration: COMBINE_IMAGE_HOLD_SECONDS,
+              fps: COMBINE_FPS
+            }
+          ]
+        });
+
+        // Upload it as a video asset
+        const baseVideo = await cloudinary.uploader.upload(imageVideoUrl, {
+          resource_type: "video",
+          folder: getFolderFromCloudinaryUrl(items[0].image_url),
+          public_id: `combine_base_${videoRowId}`,
+          overwrite: true
+        });
+
+        basePublicId = baseVideo.public_id;
     }
 
     if (!basePublicId) {
