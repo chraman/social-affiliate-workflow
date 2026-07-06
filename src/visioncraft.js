@@ -9,6 +9,27 @@ const REDIS_URL = process.env.REDIS_URL;
 const VISIONCRAFT_URL = process.env.VISIONCRAFT_URL;
 const INFLUENCER_ID = process.env.INFLUENCER_ID;
 
+const TEMPLATE_ARRAY = [
+  {
+    templateId: 1,
+    templateDescription: "home selfie image, white background, black purse and black phone",
+    aspectRation:"4:5",
+    templateUrl: "http://localhost:9000/dev-ai-images-uploads/uploads/c84d9dce-4aec-4a16-bf66-7a830873ccd6.png",
+    templatePrompt: `A stylish woman stands poised in a modern, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, footwear and overall composition in every generation.
+      Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
+      PRODUCT SPECIFICATION:`
+  },
+  {
+    templateId: 2,
+    templateDescription: "home selfie image, white background, white purse and black phone",
+    aspectRation:"9:16",
+    templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmr8vp5ax004nda4o4bou8fhg.png",
+    templatePrompt: `A stylish woman stands poised in a modern, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, jewerly, footwear and overall composition in every generation.
+      Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
+      PRODUCT SPECIFICATION:`
+  }
+]
+
 const vc = axios.create({
   baseURL: VISIONCRAFT_URL,
   headers: { 
@@ -215,13 +236,8 @@ async function generateInfluencerImage(productImageUrl) {
     // Subscribe BEFORE triggering — avoids race condition where
     // job completes before we subscribe
     console.log('🎨 Triggering AI template + Product generation...');
-    let templateImageUrl = "http://localhost:9000/dev-ai-images-uploads/uploads/c84d9dce-4aec-4a16-bf66-7a830873ccd6.png"
-    let prompt = 
-      `A stylish woman stands poised in a modern, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, footwear and overall composition in every generation.
-      Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
-      PRODUCT SPECIFICATION:
- 
-      ${productDescription}`
+    let templateImageUrl = TEMPLATE_ARRAY[1].templateUrl
+    let prompt = TEMPLATE_ARRAY[1].templatePrompt + " " +productDescription
     // Accesseries, jewelry and footware should be based on the prodct category
     const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
     // console.log(`🆔 Job ID: ${jobId}`);

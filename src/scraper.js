@@ -135,8 +135,8 @@ async function scrapeMyntraProduct(url) {
       return {
         name: nameEl?.innerText?.trim() || document.title,
         brand: brandEl?.innerText?.trim() || '',
-        price: priceEl?.innerText?.trim() || '',
-        originalPrice: mrpEl?.innerText?.trim() || '',
+        price: Number(priceEl?.innerText?.trim().replace(/[^0-9.-]+/g, "")) || '',
+        originalPrice: Number(mrpEl?.innerText?.trim().replace(/[^0-9.-]+/g, "")) || '',
         discount: discountEl?.innerText?.trim() || '',
         rating: ratingEl?.innerText?.trim() || '',
         ratingCount: ratingCountEl?.innerText?.trim() || '',

@@ -493,25 +493,48 @@ async function fetchCombinedMedia(category) {
 function combineMedia(images, videos) {
   const map = new Map();
 
+  // Process Images
   images.forEach(prod => {
-    if (!map.has(prod.product_id)) {
-      map.set(prod.product_id, { ...prod, images: [], generated_videos: [] });
+    const key = (prod.outfit_name || `${prod.brand || ''} ${prod.name || ''}`).trim();
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...prod,
+        outfit_name: key,
+        images: [],
+        generated_videos: []
+      });
     }
-    const entry = map.get(prod.product_id);
-    if (prod.images) entry.images.push(...prod.images);
+
+    const entry = map.get(key);
+
+    if (prod.images) {
+      entry.images.push(...prod.images);
+    }
   });
 
+  // Process Videos
   videos.forEach(prod => {
-    if (!map.has(prod.product_id)) {
-      map.set(prod.product_id, { ...prod, images: [], generated_videos: [] });
+    const key = (prod.outfit_name || `${prod.brand || ''} ${prod.name || ''}`).trim();
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...prod,
+        outfit_name: key,
+        images: [],
+        generated_videos: []
+      });
     }
-    const entry = map.get(prod.product_id);
-    if (prod.generated_videos) entry.generated_videos.push(...prod.generated_videos);
+
+    const entry = map.get(key);
+
+    if (prod.generated_videos) {
+      entry.generated_videos.push(...prod.generated_videos);
+    }
   });
 
   return Array.from(map.values());
 }
-
 // ─── Load images and videos grouped by outfit ──────────────────────
 async function loadMedia() {
   selectView.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -532,7 +555,7 @@ async function loadMedia() {
       return `
         <div class="outfit-card">
           <div class="outfit-header">
-            <span class="outfit-name">${outfit.outfit_name || ((outfit.brand || '') + ' ' + (outfit.name || ''))}</span>
+            <span class="outfit-name">${outfit.outfit_name}</span>
             <span class="outfit-price">₹${outfit.price || '-'}</span>
           </div>
           <div class="image-grid">

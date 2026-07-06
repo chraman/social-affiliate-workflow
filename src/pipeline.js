@@ -66,8 +66,8 @@ async function createProduct(product) {
       product.outfitName,
       product.myntraUrl,
       product.affiliateLink,
-      product.priceValue || null,
-      product.originalPriceValue || null,   // add this alongside priceValue — numeric version of originalPrice
+      product.price || null,
+      product.originalPrice || null,   // add this alongside priceValue — numeric version of originalPrice
       product.discount || null,
       product.rating ? parseFloat(product.rating) : null,
       product.ratingCount ? parseInt(product.ratingCount, 10) : null,

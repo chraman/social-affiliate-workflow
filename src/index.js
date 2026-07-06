@@ -72,6 +72,7 @@ async function handleNewProduct(msg, chat, url) {
 
         product.myntraUrl = url;
         product.affiliateLink = affiliateUrl;
+        product.category = "Ethnic Female Co-ord Set"
         const dbProduct = await createProduct(product);
         log("DB_SAVED", chatId, `Product #${dbProduct.id} saved`);
 
