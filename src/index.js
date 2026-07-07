@@ -57,7 +57,10 @@ client.on('message_create', async (msg) => {
         return handleNewProduct(msg, chat, myntraUrl);
     }
 });
-
+const categoriesArray = [
+    "Ethnic Female Co-ord Set",
+    "Midi Dress"
+]
 async function handleNewProduct(msg, chat, url) {
     const chatId = chat.id._serialized;
     log("NEW_LINK", chatId, `Scraping: ${url}`);
@@ -72,7 +75,7 @@ async function handleNewProduct(msg, chat, url) {
 
         product.myntraUrl = url;
         product.affiliateLink = affiliateUrl;
-        product.category = "Ethnic Female Co-ord Set"
+        product.category = categoriesArray[1]
         const dbProduct = await createProduct(product);
         log("DB_SAVED", chatId, `Product #${dbProduct.id} saved`);
 

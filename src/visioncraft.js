@@ -27,6 +27,16 @@ const TEMPLATE_ARRAY = [
     templatePrompt: `A stylish woman stands poised in a modern, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, jewerly, footwear and overall composition in every generation.
       Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
       PRODUCT SPECIFICATION:`
+  },
+  {
+    templateId: 2,
+    templateDescription: "home selfie image, white background, white phone",
+    aspectRation:"9:16",
+    templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmra5tuvt000fdabwd2seep2t.png",
+    templatePrompt: `A stylish woman stands poised in a modern sunlight room, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, jewerly, footwear and overall composition in every generation.
+      Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
+      Do not modify, regenerate, or distort the hands or fingers. Preserve the exact finger count (five fingers per hand), finger anatomy, finger length, finger proportions, finger positions, hand shape, nail appearance, and the natural grip on the phone. No fused, duplicated, missing, elongated, twisted, bent, warped, or deformed fingers or hands.
+      PRODUCT SPECIFICATION:`
   }
 ]
 
@@ -236,8 +246,8 @@ async function generateInfluencerImage(productImageUrl) {
     // Subscribe BEFORE triggering — avoids race condition where
     // job completes before we subscribe
     console.log('🎨 Triggering AI template + Product generation...');
-    let templateImageUrl = TEMPLATE_ARRAY[1].templateUrl
-    let prompt = TEMPLATE_ARRAY[1].templatePrompt + " " +productDescription
+    let templateImageUrl = TEMPLATE_ARRAY[2].templateUrl
+    let prompt = TEMPLATE_ARRAY[2].templatePrompt + " " +productDescription
     // Accesseries, jewelry and footware should be based on the prodct category
     const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
     // console.log(`🆔 Job ID: ${jobId}`);
