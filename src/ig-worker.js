@@ -34,7 +34,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const IG_USER_ID = process.env.IG_USER_ID;        // your Instagram Business account ID
 const IG_TOKEN = process.env.IG_ACCESS_TOKEN;      // long-lived Page access token
-const GRAPH_API = 'https://graph.facebook.com/v25.0';
+const GRAPH_API = process.env.IG_WORKER_URL;
 
 async function createMediaContainer(imageUrl, isCarouselItem) {
   const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media`, {
