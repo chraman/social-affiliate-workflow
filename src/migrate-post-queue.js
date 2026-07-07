@@ -9,20 +9,7 @@ async function runMigration() {
     connectionString: process.env.DATABASE_URL, // Ensure this is set
   });
 
-  const sql = `
-    -- Adds support for "combine picked clips into one video"
-    ALTER TABLE product_videos 
-    ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'magic_hour'; 
-
-    ALTER TABLE product_videos 
-    ADD COLUMN IF NOT EXISTS source_items JSONB;
-
-    -- Ensure these columns are nullable
-    ALTER TABLE product_videos 
-    ALTER COLUMN magic_hour_project_id DROP NOT NULL;
-    
-    ALTER TABLE product_videos 
-    ALTER COLUMN source_image_id DROP NOT NULL;
+  const sql = `ALTER TABLE post_queue ADD COLUMN IF NOT EXISTS post_type TEXT NOT NULL DEFAULT 'FEED'
   `;
 
   try {

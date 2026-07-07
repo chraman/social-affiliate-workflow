@@ -527,70 +527,105 @@ app.delete('/api/videos/:id', async (req, res) => {
   }
 });
 
+// Helper: insert one post_queue row + its items + product links. Shared by
+// both the FEED/CAROUSEL/REELS path and the STORY path below.
+async function insertQueueRow(client, { imageUrls, caption, scheduled_for, mediaType, postType, items }) {
+  const postResult = await client.query(
+    `INSERT INTO post_queue (image_urls, caption, scheduled_for, status, media_type, post_type)
+     VALUES ($1, $2, $3::timestamp AT TIME ZONE 'Asia/Kolkata', 'pending', $4, $5) RETURNING id`,
+    [imageUrls, caption, scheduled_for, mediaType, postType]
+  );
+  const postQueueId = postResult.rows[0].id;
+
+  for (const item of items) {
+    const isVideo = item.media_type === 'VIDEO';
+    const insertItemRes = await client.query(
+      `INSERT INTO post_queue_items (post_queue_id, product_id, image_id, video_id, position, media_type)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        postQueueId,
+        item.product_id ? parseInt(item.product_id, 10) : null,
+        (isVideo || !item.image_id) ? null : parseInt(item.image_id, 10),
+        (!isVideo || !item.video_id) ? null : parseInt(item.video_id, 10),
+        item.position,
+        item.media_type || 'IMAGE'
+      ]
+    );
+    const queueItemId = insertItemRes.rows[0].id;
+
+    let productIdsForItem = [item.product_id ? parseInt(item.product_id, 10) : null].filter(Boolean);
+    if (isVideo && item.video_id) {
+      const vidRes = await client.query(
+        `SELECT product_ids, product_id FROM product_videos WHERE id = $1`,
+        [parseInt(item.video_id, 10)]
+      );
+      if (vidRes.rows.length > 0) {
+        const row = vidRes.rows[0];
+        productIdsForItem = (row.product_ids && row.product_ids.length > 0)
+          ? row.product_ids
+          : [row.product_id].filter(Boolean);
+      }
+    }
+
+    let displayOrder = 1;
+    for (const pid of productIdsForItem) {
+      await client.query(
+        `INSERT INTO post_queue_item_products (post_queue_item_id, product_id, display_order) VALUES ($1, $2, $3)`,
+        [queueItemId, pid, displayOrder++]
+      );
+    }
+  }
+
+  return postQueueId;
+}
+
 app.post('/api/queue', async (req, res) => {
-  const { items, caption, scheduled_for } = req.body;
+  const { items, caption, scheduled_for, post_type } = req.body;
+  const postType = post_type === 'STORY' ? 'STORY' : 'FEED';
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'No items selected' });
   }
 
-  const hasVideo = items.some(i => i.media_type === 'VIDEO');
-  const postMediaType = items.length === 1 ? (hasVideo ? 'REELS' : 'IMAGE') : 'CAROUSEL';
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const imageUrls = items.map(i => i.image_url);
+    let postQueueIds = [];
 
-    const postResult = await client.query(
-      `INSERT INTO post_queue (image_urls, caption, scheduled_for, status, media_type)
-       VALUES ($1, $2, $3::timestamp AT TIME ZONE 'Asia/Kolkata', 'pending', $4) RETURNING id`,
-      [imageUrls, caption, scheduled_for, postMediaType]
-    );
-    const postQueueId = postResult.rows[0].id;
-
-    for (const item of items) {
-      const isVideo = item.media_type === 'VIDEO';
-      const insertItemRes = await client.query(
-        `INSERT INTO post_queue_items (post_queue_id, product_id, image_id, video_id, position, media_type)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [
-          postQueueId, 
-          item.product_id ? parseInt(item.product_id, 10) : null, 
-          (isVideo || !item.image_id) ? null : parseInt(item.image_id, 10), 
-          (!isVideo || !item.video_id) ? null : parseInt(item.video_id, 10), 
-          item.position, 
-          item.media_type || 'IMAGE'
-        ]
-      );
-      const queueItemId = insertItemRes.rows[0].id;
-
-      let productIdsForItem = [item.product_id ? parseInt(item.product_id, 10) : null].filter(Boolean);
-      if (isVideo && item.video_id) {
-        const vidRes = await client.query(
-          `SELECT product_ids, product_id FROM product_videos WHERE id = $1`,
-          [parseInt(item.video_id, 10)]
-        );
-        if (vidRes.rows.length > 0) {
-          const row = vidRes.rows[0];
-          productIdsForItem = (row.product_ids && row.product_ids.length > 0)
-            ? row.product_ids
-            : [row.product_id].filter(Boolean);
-        }
+    if (postType === 'STORY') {
+      // Instagram Stories don't support carousels — each selected item is
+      // queued and published as its own separate story.
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const mediaType = item.media_type === 'VIDEO' ? 'VIDEO' : 'IMAGE';
+        const id = await insertQueueRow(client, {
+          imageUrls: [item.image_url],
+          caption: null, // Stories don't render a caption field
+          scheduled_for,
+          mediaType,
+          postType: 'STORY',
+          items: [{ ...item, position: 1, media_type: mediaType }]
+        });
+        postQueueIds.push(id);
       }
-
-      let displayOrder = 1;
-      for (const pid of productIdsForItem) {
-        await client.query(
-          `INSERT INTO post_queue_item_products (post_queue_item_id, product_id, display_order) VALUES ($1, $2, $3)`,
-          [queueItemId, pid, displayOrder++]
-        );
-      }
+    } else {
+      const hasVideo = items.some(i => i.media_type === 'VIDEO');
+      const postMediaType = items.length === 1 ? (hasVideo ? 'REELS' : 'IMAGE') : 'CAROUSEL';
+      const imageUrls = items.map(i => i.image_url);
+      const id = await insertQueueRow(client, {
+        imageUrls,
+        caption,
+        scheduled_for,
+        mediaType: postMediaType,
+        postType: 'FEED',
+        items
+      });
+      postQueueIds.push(id);
     }
 
     await client.query('COMMIT');
-    res.json({ ok: true, post_queue_id: postQueueId });
+    res.json({ ok: true, post_queue_id: postQueueIds[0], post_queue_ids: postQueueIds });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);
@@ -603,7 +638,7 @@ app.post('/api/queue', async (req, res) => {
 app.get('/api/queue', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT pq.id, pq.image_urls, pq.caption, pq.scheduled_for, pq.status, pq.posted_at, pq.media_type,
+      SELECT pq.id, pq.image_urls, pq.caption, pq.scheduled_for, pq.status, pq.posted_at, pq.media_type, pq.post_type,
         COALESCE(json_agg(json_build_object(
           'product_id', p.id, 'outfit_name', p.outfit_name, 
           'affiliate_link', p.affiliate_link, 'position', pqi.position,

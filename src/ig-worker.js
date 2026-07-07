@@ -97,6 +97,44 @@ async function createReelsContainer(videoUrl, caption) {
   return res.data.id;
 }
 
+// ─── Stories ──────────────────────────────────────────────────────
+// Stories don't support carousels — one media item per container, and no
+// caption field is rendered on a story.
+async function createImageStoryContainer(imageUrl) {
+  const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media`, {
+    image_url: imageUrl,
+    media_type: 'STORIES'
+  }, {
+    headers: { 'Authorization': `Bearer ${IG_TOKEN}` }
+  });
+  return res.data.id;
+}
+
+async function createVideoStoryContainer(videoUrl) {
+  const res = await axios.post(`${GRAPH_API}/${IG_USER_ID}/media`, {
+    video_url: videoUrl,
+    media_type: 'STORIES'
+  }, {
+    headers: { 'Authorization': `Bearer ${IG_TOKEN}` }
+  });
+  return res.data.id;
+}
+
+async function postStoryToInstagram(item) {
+  let creationId;
+  if (item.media_type === 'VIDEO') {
+    creationId = await createVideoStoryContainer(item.url);
+    await pollContainerReady(creationId);
+  } else {
+    creationId = await createImageStoryContainer(item.url);
+  }
+
+  // Graph API sometimes needs a moment before the container is publish-ready
+  await new Promise(r => setTimeout(r, 3000));
+
+  return await publishContainer(creationId);
+}
+
 // Video containers (Reels or carousel video children) process asynchronously on
 // Meta's side — poll status_code until FINISHED before it can be published/used
 // as a carousel child. Image containers don't need this.
@@ -192,9 +230,12 @@ async function processQueue() {
       items = (post.image_urls || []).map(u => ({ url: u, media_type: 'IMAGE' }));
     }
 
-    console.log(`[${new Date().toLocaleTimeString()}] Publishing post #${post.id} (${items.length} item(s), ${items.some(i => i.media_type === 'VIDEO') ? 'contains video' : 'images only'})...`);
+    const isStory = post.post_type === 'STORY';
+    console.log(`[${new Date().toLocaleTimeString()}] Publishing ${isStory ? 'STORY' : 'post'} #${post.id} (${items.length} item(s), ${items.some(i => i.media_type === 'VIDEO') ? 'contains video' : 'images only'})...`);
     try {
-      const mediaId = await postToInstagram(items, post.caption);
+      const mediaId = isStory
+        ? await postStoryToInstagram(items[0])
+        : await postToInstagram(items, post.caption);
 
       await pool.query(
         `UPDATE post_queue SET status = 'posted', posted_at = NOW(), ig_media_id = $1 WHERE id = $2`,

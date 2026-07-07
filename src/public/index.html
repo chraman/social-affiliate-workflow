@@ -268,6 +268,8 @@
     border-radius: 6px;
     flex-shrink: 0;
   }
+  .post-dest-toggle { display: flex; gap: 16px; margin-bottom: 12px; font-size: 14px; }
+  .post-dest-toggle label { display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 0; }
   .modal-actions {
     display: flex;
     gap: 8px;
@@ -404,11 +406,22 @@
     <h2>Create post</h2>
     <div class="selected-strip" id="modalSelectedStrip"></div>
 
+    <label>Publish as</label>
+    <div class="post-dest-toggle">
+      <label><input type="radio" name="postDest" value="FEED" checked> Feed post</label>
+      <label><input type="radio" name="postDest" value="STORY"> Story</label>
+    </div>
+
     <label>Post type</label>
     <div id="postTypeLabel" style="font-size:14px;"></div>
+    <div id="storyNote" style="display:none; font-size:12px; color:var(--text-dim); margin-top:-6px; margin-bottom:10px;">
+      Each selected item will be posted as its own separate Story (no carousels on Stories). Captions aren't shown on Stories.
+    </div>
 
-    <label>Caption</label>
-    <textarea id="captionInput" placeholder="Write a caption…"></textarea>
+    <div id="captionField">
+      <label>Caption</label>
+      <textarea id="captionInput" placeholder="Write a caption…"></textarea>
+    </div>
 
     <label>Schedule for</label>
     <input type="datetime-local" id="scheduleInput">
@@ -902,16 +915,40 @@ async function deleteVideo(id) {
 }
 
 // ─── Modal: caption + schedule ──────────────────────────
+function updatePostTypeUI() {
+  const dest = document.querySelector('input[name="postDest"]:checked').value;
+  const hasVideo = state.selected.some(s => s.media_type === 'VIDEO');
+  const captionField = document.getElementById('captionField');
+  const storyNote = document.getElementById('storyNote');
+
+  if (dest === 'STORY') {
+    document.getElementById('postTypeLabel').textContent =
+      state.selected.length === 1
+        ? `Story — ${hasVideo ? 'video' : 'image'}`
+        : `${state.selected.length} separate Stories${hasVideo ? ' (includes video)' : ''}`;
+    storyNote.style.display = 'block';
+    captionField.style.display = 'none';
+  } else {
+    document.getElementById('postTypeLabel').textContent =
+      state.selected.length === 1
+        ? (hasVideo ? 'Reel' : 'Single image post')
+        : `Carousel — ${state.selected.length} items${hasVideo ? ' (includes video)' : ''}`;
+    storyNote.style.display = 'none';
+    captionField.style.display = 'block';
+  }
+}
+
+document.querySelectorAll('input[name="postDest"]').forEach(radio => {
+  radio.addEventListener('change', updatePostTypeUI);
+});
+
 document.getElementById('openCaptionModal').addEventListener('click', () => {
   document.getElementById('modalSelectedStrip').innerHTML = state.selected.map(s =>
     s.media_type === 'VIDEO' ? `<video src="${s.image_url}" muted></video>` : `<img src="${s.image_url}">`
   ).join('');
 
-  const hasVideo = state.selected.some(s => s.media_type === 'VIDEO');
-  document.getElementById('postTypeLabel').textContent =
-    state.selected.length === 1
-      ? (hasVideo ? 'Reel' : 'Single image post')
-      : `Carousel — ${state.selected.length} items${hasVideo ? ' (includes video)' : ''}`;
+  document.querySelector('input[name="postDest"][value="FEED"]').checked = true;
+  updatePostTypeUI();
 
   const outfitNames = [...new Set(state.selected.map(s => s.outfit_name).filter(Boolean))];
   if (outfitNames.length > 1) {
@@ -953,7 +990,8 @@ document.getElementById('cancelModal').addEventListener('click', () => {
 });
 
 document.getElementById('confirmQueue').addEventListener('click', async () => {
-  const caption = document.getElementById('captionInput').value;
+  const post_type = document.querySelector('input[name="postDest"]:checked').value;
+  const caption = post_type === 'STORY' ? '' : document.getElementById('captionInput').value;
   const scheduled_for = document.getElementById('scheduleInput').value;
 
   const items = state.selected.map((s, i) => ({
@@ -969,14 +1007,14 @@ document.getElementById('confirmQueue').addEventListener('click', async () => {
     const res = await fetch('/api/queue', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, caption, scheduled_for })
+      body: JSON.stringify({ items, caption, scheduled_for, post_type })
     });
 
     if (res.ok) {
       modalBackdrop.classList.remove('open');
       state.selected = [];
       renderSelectionState();
-      alert('Added to queue!');
+      alert(post_type === 'STORY' ? 'Added to Story queue!' : 'Added to queue!');
     } else {
       const data = await res.json().catch(() => ({}));
       alert('Failed to add to queue: ' + (data.error || 'Unknown error'));
@@ -1007,6 +1045,7 @@ async function loadQueue() {
           <span class="q-time">${item.scheduled_for ? new Date(item.scheduled_for).toLocaleString() : 'Not scheduled'}</span>
           <span>
             <span class="q-status">${item.status}</span>
+            ${item.post_type === 'STORY' ? `<span class="q-media-type" style="background:var(--accent);color:#fff;">STORY</span>` : ''}
             ${item.media_type ? `<span class="q-media-type">${item.media_type}</span>` : ''}
           </span>
         </div>
