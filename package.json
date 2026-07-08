@@ -14,7 +14,8 @@
     "stop-workers": "pm2 stop ig-worker && pm2 stop ig-webhook && pm2 stop videoWorker",
     "log-ig-worker": "pm2 logs ig-worker",
     "log-ig-webhook": "pm2 logs ig-webhook",
-    "log-videoWorker": "pm2 logs videoWorker"
+    "log-videoWorker": "pm2 logs videoWorker",
+    "ngrok": "ngrok http --url branchless-corazon-uncoifed.ngrok-free.dev 5000"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

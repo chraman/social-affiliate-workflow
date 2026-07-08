@@ -65,6 +65,7 @@ app.get('/webhook', (req, res) => {
 const IG_APP_ID = process.env.IG_APP_ID;
 const IG_APP_SECRET = process.env.IG_APP_SECRET;
 const REDIRECT_URI = process.env.IG_OAUTH_REDIRECT_URI; // e.g. https://your-tunnel-domain/auth/callback
+const IG_USER_ID = process.env.IG_USER_ID;
 
 app.get('/auth/callback', async (req, res) => {
   const { code, error, error_description } = req.query;
@@ -161,12 +162,20 @@ function formatLinkReply(items) {
 }
 
 // ─── Send a DM reply via Instagram Messaging API ────────────────────────────
-async function sendDirectMessage(recipientId, text) {
-  await axios.post(`${GRAPH_API}/me/messages`, {
-    recipient: { id: recipientId },
-    message: { text }
-  }, {
-    params: { access_token: IG_TOKEN }
+async function sendDirectMessageFromComment(comment, reply) {
+  await axios.post(
+    `${GRAPH_API}/${IG_USER_ID}/messages`, {
+        recipient:{
+          comment_id: comment.id
+        },
+        message: {
+            text: reply
+        }
+    }, 
+    {
+      headers: {
+      'Authorization': `Bearer ${IG_TOKEN}`
+    }
   });
 }
 
@@ -223,16 +232,7 @@ app.post("/webhook", async (req, res) => {
           );
 
           // Send private DM
-          await axios.post(
-            `${GRAPH_API}/${comment.author.id}/messages`,
-            null,
-            {
-              params: {
-                message: reply,
-                access_token: IG_TOKEN,
-              },
-            }
-          );
+          await sendDirectMessageFromComment(comment, reply)
 
           console.log(
             `Processed comment ${comment.id} on media ${mediaId}`
@@ -242,46 +242,46 @@ app.post("/webhook", async (req, res) => {
         break;
       }
 
-      case "message.received": {
-        const message = body.message;
+      // case "message.received": {
+      //   const message = body.message;
 
-        const senderId = message.author.id;
-        const text = (message.text || "").toLowerCase();
+      //   const senderId = message.author.id;
+      //   const text = (message.text || "").toLowerCase();
 
-        if (
-          text.includes("link") ||
-          text.includes("price")
-        ) {
-          const recent = await pool.query(`
-            SELECT
-              pqi.position,
-              pqip.display_order,
-              p.outfit_name,
-              p.affiliate_link
-            FROM post_queue pq
-            JOIN post_queue_items pqi
-              ON pqi.post_queue_id = pq.id
-            JOIN post_queue_item_products pqip
-              ON pqip.post_queue_item_id = pqi.id
-            JOIN products p
-              ON p.id = pqip.product_id
-            WHERE pq.status = 'posted'
-            ORDER BY
-              pq.posted_at DESC,
-              pqi.position ASC,
-              pqip.display_order ASC
-            LIMIT 5
-          `);
+      //   if (
+      //     text.includes("link") ||
+      //     text.includes("price")
+      //   ) {
+      //     const recent = await pool.query(`
+      //       SELECT
+      //         pqi.position,
+      //         pqip.display_order,
+      //         p.outfit_name,
+      //         p.affiliate_link
+      //       FROM post_queue pq
+      //       JOIN post_queue_items pqi
+      //         ON pqi.post_queue_id = pq.id
+      //       JOIN post_queue_item_products pqip
+      //         ON pqip.post_queue_item_id = pqi.id
+      //       JOIN products p
+      //         ON p.id = pqip.product_id
+      //       WHERE pq.status = 'posted'
+      //       ORDER BY
+      //         pq.posted_at DESC,
+      //         pqi.position ASC,
+      //         pqip.display_order ASC
+      //       LIMIT 5
+      //     `);
 
-          const reply = formatLinkReply(recent.rows);
+      //     const reply = formatLinkReply(recent.rows);
 
-          await sendDirectMessage(senderId, reply);
+      //     await sendDirectMessage(senderId, reply);
 
-          console.log(`Replied to DM from ${senderId}`);
-        }
+      //     console.log(`Replied to DM from ${senderId}`);
+      //   }
 
-        break;
-      }
+      //   break;
+      // }
 
       default:
         console.log(`Ignoring event: ${body.event}`);

@@ -47,7 +47,7 @@ const CONFIG = {
 // System prompt that tells Gemini exactly what to extract. Keep this tight —
 // the output feeds directly into the Flux prompt, so we want a dense,
 // visually-descriptive paragraph, not chatty commentary.
-const GEMINI_SYSTEM_PROMPT = `
+const GEMINI_SYSTEM_PROMPT_FOR_PRODUCT_DESCRIPTION = `
 You are a world-class fashion technical designer, apparel engineer, and AI fashion reverse-engineering expert.
 
 Your task is NOT to describe the image.
@@ -130,6 +130,16 @@ Do NOT use headings.
 Return exactly ONE continuous paragraph between 150 and 300 words, total chars not more that 1200. optimized for direct use inside an AI image generation prompt.
 `.trim();
 
+const GEMINI_SYSTEM_PROMPT_FOR_ACCESSORIES = `
+You are an expert fashion stylist and AI prompt engineer specializing in FLUX text-to-image prompting. 
+
+I am going to provide you with a product description of a clothing item. Your task is to analyze the clothing's style, fabric, and color, and then generate ONE single, cohesive FLUX image prompt that displays the outfit styled completely with complementary accessories, jewelry, and footwear.
+
+Return exactly ONE continuous paragraph total chars not more that 300. optimized for direct use inside an AI image generation prompt.
+
+Here is the clothing product description:
+
+`.trim();
 // ---------------------------------------------------------------------------
 // Step 1: Analyze the product image with Gemini 2.5 Flash
 // ---------------------------------------------------------------------------
@@ -144,7 +154,7 @@ async function analyzeProductWithGemini(productImagePath) {
 
   const body = {
     system_instruction: {
-      parts: [{ text: GEMINI_SYSTEM_PROMPT }],
+      parts: [{ text: GEMINI_SYSTEM_PROMPT_FOR_PRODUCT_DESCRIPTION }],
     },
     contents: [
       {
@@ -179,6 +189,43 @@ async function analyzeProductWithGemini(productImagePath) {
   return description;
 }
 
+async function generateAccessoriesDecription(productDescription) {
+  if (!CONFIG.geminiApiKey) {
+    throw new Error("Missing GEMINI_API_KEY in environment.");
+  }
+  let prompt = GEMINI_SYSTEM_PROMPT_FOR_ACCESSORIES + productDescription
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.4
+    },
+  };
+
+  const url = `${CONFIG.geminiEndpoint(CONFIG.geminiModel)}?key=${CONFIG.geminiApiKey}`;
+
+  const { data } = await axios.post(url, body, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 60000,
+  });
+
+  const description =
+    data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("").trim();
+
+  if (!description) {
+    throw new Error(
+      "Gemini returned no description. Full response: " + JSON.stringify(data)
+    );
+  }
+
+  return description;
+}
 // ---------------------------------------------------------------------------
 // Step 2: Send everything to the Kaggle Flux server (via ngrok)
 //
@@ -301,5 +348,6 @@ async function downloadImageAsBuffer(url) {
 module.exports = {
   analyzeProductWithGemini,
   generateImageWithFlux,
-  downloadImageAsBuffer
+  downloadImageAsBuffer,
+  generateAccessoriesDecription
 };

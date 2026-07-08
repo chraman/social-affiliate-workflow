@@ -1,7 +1,7 @@
 const axios = require('axios');
 const Redis = require('ioredis');
 const path = require('path');
-const { analyzeProductWithGemini, generateImageWithFlux } = require('./generate-product-image')
+const { analyzeProductWithGemini, generateImageWithFlux, generateAccessoriesDecription } = require('./generate-product-image')
 require('dotenv').config();
 const fs = require("fs");
 
@@ -29,14 +29,27 @@ const TEMPLATE_ARRAY = [
       PRODUCT SPECIFICATION:`
   },
   {
-    templateId: 2,
+    templateId: 3,
     templateDescription: "home selfie image, white background, white phone",
     aspectRation:"9:16",
     templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmra5tuvt000fdabwd2seep2t.png",
-    templatePrompt: `A stylish woman stands poised in a modern sunlight room, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, accessories, jewerly, footwear and overall composition in every generation.
-      Replace ONLY her clothing with the following product. The outfit must exactly match the product specification below, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction. Fit the garments naturally to the model while maintaining the original pose.
-      Do not modify, regenerate, or distort the hands or fingers. Preserve the exact finger count (five fingers per hand), finger anatomy, finger length, finger proportions, finger positions, hand shape, nail appearance, and the natural grip on the phone. No fused, duplicated, missing, elongated, twisted, bent, warped, or deformed fingers or hands.
-      PRODUCT SPECIFICATION:`
+    templatePrompt: 
+    `A stylish woman stands poised in a modern environment, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, and overall composition in every generation.
+
+                    Modify ONLY her outfit, accessories, jewelry, and footwear based on the specifications below. The entire ensemble must fit naturally onto the model while strictly preserving the original pose and composition.
+
+                    ---
+                    ### 👗 CLOTHING SPECIFICATION:
+                    [INJECT_CLOTHING_DESCRIPTION]
+
+                    The outfit must exactly match this product specification, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction.
+
+                    ---
+                    ### 👜 ACCESSORIES, JEWELRY, & FOOTWEAR SPECIFICATION:
+                    [INJECT_ACCESSORIES_DESCRIPTION]
+
+                    The model must be actively styled with these items. Ensure the footwear matches the pose naturally, the jewelry (rings/bracelets) is visible on the hands holding or near the phone, and any bags or accessories are integrated realistically into the mirror selfie scene (e.g., slung over her shoulder, resting on nearby furniture, or held naturally).`
+  
   }
 ]
 
@@ -237,6 +250,14 @@ async function generateInfluencerImage(productImageUrl) {
 
     console.log('📝 Product description:', productDescription);
 
+    console.log('🔍 Describing accessories scene...');
+    const accessoriesDescription = await generateAccessoriesDecription(productDescription);
+
+    if (!accessoriesDescription) {
+      throw new Error('Could not generate accessories description');
+    }
+    console.log('📝 Accessories description:', accessoriesDescription);
+
     console.log('📤 Getting upload URL...');
     const { uploadUrl, key } = await getUploadUrl(productImageUrl);
 
@@ -247,7 +268,7 @@ async function generateInfluencerImage(productImageUrl) {
     // job completes before we subscribe
     console.log('🎨 Triggering AI template + Product generation...');
     let templateImageUrl = TEMPLATE_ARRAY[2].templateUrl
-    let prompt = TEMPLATE_ARRAY[2].templatePrompt + " " +productDescription
+    let prompt = TEMPLATE_ARRAY[2].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
     // Accesseries, jewelry and footware should be based on the prodct category
     const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
     // console.log(`🆔 Job ID: ${jobId}`);

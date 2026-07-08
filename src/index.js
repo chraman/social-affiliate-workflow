@@ -59,7 +59,9 @@ client.on('message_create', async (msg) => {
 });
 const categoriesArray = [
     "Ethnic Female Co-ord Set",
-    "Midi Dress"
+    "Midi Dress",
+    "Cotton wear saree for everyday",
+    "Short Kurti"
 ]
 async function handleNewProduct(msg, chat, url) {
     const chatId = chat.id._serialized;
@@ -75,7 +77,7 @@ async function handleNewProduct(msg, chat, url) {
 
         product.myntraUrl = url;
         product.affiliateLink = affiliateUrl;
-        product.category = categoriesArray[1]
+        product.category = categoriesArray[categoriesArray.length-1]
         const dbProduct = await createProduct(product);
         log("DB_SAVED", chatId, `Product #${dbProduct.id} saved`);
 
