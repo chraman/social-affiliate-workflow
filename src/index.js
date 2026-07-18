@@ -39,7 +39,7 @@ client.on('qr', (qr) => {
 
 client.on('authenticated', () => console.log('✅ WhatsApp authenticated'));
 client.on('ready', () => console.log('🟢 Bot is ready and listening...\n'));
-
+const SELF_CHAT_ID = "124644464017605@lid";
 client.on('message_create', async (msg) => {
     const text = msg.body?.trim();
     if (!text || msg.body.includes(BOT_SIGNATURE)) return;
@@ -61,7 +61,9 @@ const categoriesArray = [
     "Ethnic Female Co-ord Set",
     "Midi Dress",
     "Cotton wear saree for everyday",
-    "Short Kurti"
+    "Short Kurti",
+    "Suits",
+    "Top and shirts"
 ]
 async function handleNewProduct(msg, chat, url) {
     const chatId = chat.id._serialized;
@@ -77,11 +79,11 @@ async function handleNewProduct(msg, chat, url) {
 
         product.myntraUrl = url;
         product.affiliateLink = affiliateUrl;
-        product.category = categoriesArray[categoriesArray.length-1]
+        product.category = categoriesArray[0]
         const dbProduct = await createProduct(product);
         log("DB_SAVED", chatId, `Product #${dbProduct.id} saved`);
 
-        const collageBuffer = await createCollage(product.images.slice(0, 4));
+        const collageBuffer = await createCollage(product.images);
         const collagePath = path.join(__dirname, "temp_collage.jpg");
         fs.writeFileSync(collagePath, collageBuffer);
         log("COLLAGE_GENERATED", chatId, "Temporary file created");

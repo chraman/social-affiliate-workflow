@@ -176,6 +176,8 @@
     border-top: 1px solid var(--border);
     padding: 12px 14px;
     z-index: 20;
+    max-height: 70vh;
+    overflow-y: auto;
     transform: translateY(100%);
     transition: transform 0.2s ease;
   }
@@ -197,6 +199,7 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .btn:hover { filter: brightness(1.08); }
   .btn.secondary {
     background: var(--surface);
     color: var(--text-dim);
@@ -267,6 +270,33 @@
     object-fit: cover;
     border-radius: 6px;
     flex-shrink: 0;
+  }
+  /* Thumbnails inside the tray's own strip are clickable — clicking one
+     shows it clearly, at full size, in the preview box above. */
+  #selectedStrip img,
+  #selectedStrip video {
+    cursor: pointer;
+  }
+  #selectedStrip .active {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .tray-preview {
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 10px;
+    display: none;
+  }
+  .tray-preview.has-preview { display: block; }
+  .tray-preview img, .tray-preview video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: var(--surface);
   }
   .post-dest-toggle { display: flex; gap: 16px; margin-bottom: 12px; font-size: 14px; }
   .post-dest-toggle label { display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 0; }
@@ -371,6 +401,133 @@
     text-align: center;
     padding: 0 20px 10px;
   }
+
+  /* ───────────────────────────────────────────────────────
+     Desktop layout (≥900px)
+     Structure, ids, classes and JS behavior are unchanged —
+     these rules only rearrange spacing/sizing for wider viewports.
+     ─────────────────────────────────────────────────────── */
+  @media (min-width: 900px) {
+    body {
+      padding-bottom: 40px;
+    }
+    body.tray-open {
+      padding-right: 360px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 16px 32px;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      margin: 0;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+    #categorySelect {
+      width: 260px;
+    }
+    .tabs {
+      margin-top: 0;
+      flex: 0 0 auto;
+      width: auto;
+    }
+    .tab {
+      flex: 0 0 auto;
+      padding: 8px 20px;
+    }
+    .tab:hover:not(.active) {
+      border-color: var(--text-dim);
+      color: var(--text);
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 28px 32px 60px;
+    }
+
+    /* Outfit cards: 3 columns by default. When the selection sidebar
+       is open, drop to 2 columns (toggled via body.tray-open below)
+       so cards get more room next to the open sidebar. */
+    #selectView {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    body.tray-open #selectView {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .outfit-card { margin-bottom: 0; }
+    .outfit-card:hover { border-color: var(--text-dim); }
+
+    /* Video queue as a grid of cards, thumb-on-top for a gallery feel */
+    #videosView {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 18px;
+    }
+    .video-card {
+      margin-bottom: 0;
+      flex-direction: column;
+    }
+    .video-thumb {
+      width: 100%;
+      height: 260px;
+    }
+    .video-actions { margin-top: 4px; }
+
+    /* Post queue as a grid too */
+    #queueView {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+    .queue-item { margin-bottom: 0; }
+
+    /* Selection tray becomes a persistent right-hand sidebar panel
+       instead of a bottom sheet. It still opens/closes via the same
+       .open class toggled by the unchanged JS. */
+    .tray {
+      top: 0;
+      right: 0;
+      left: auto;
+      bottom: 0;
+      width: 360px;
+      height: 100vh;
+      max-height: none;
+      border-top: none;
+      border-left: 1px solid var(--border);
+      box-shadow: -8px 0 24px rgba(0,0,0,0.35);
+      display: flex;
+      flex-direction: column;
+      padding: 22px;
+      overflow-y: auto;
+      transform: translateX(100%);
+    }
+    .tray.open { transform: translateX(0); }
+    .selected-strip { flex-wrap: wrap; }
+    #combineBtn { margin-top: 8px; }
+
+    /* Caption/schedule modal becomes a centered dialog rather than
+       a bottom sheet */
+    .modal-backdrop {
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal {
+      width: 100%;
+      max-width: 480px;
+      border-radius: 16px;
+      max-height: 80vh;
+    }
+  }
 </style>
 </head>
 <body>
@@ -396,6 +553,7 @@
     <strong id="traySummaryText">0 selected</strong>
     <button class="btn secondary" id="clearSelection">Clear</button>
   </div>
+  <div class="tray-preview" id="trayPreview"></div>
   <div class="selected-strip" id="selectedStrip"></div>
   <button class="btn full" id="openCaptionModal" style="margin-top:10px;">Continue →</button>
   <button class="btn secondary full" id="combineBtn" style="margin-top:8px;">🎞 Combine into one video</button>
@@ -449,6 +607,31 @@ const selectedStrip = document.getElementById('selectedStrip');
 const modalBackdrop = document.getElementById('modalBackdrop');
 
 let videoPollTimer = null;
+let activePreviewKey = null;
+
+function getItemKey(item) {
+  return `${item.media_type}-${item.media_type === 'VIDEO' ? item.video_id : item.image_id}`;
+}
+
+function renderTrayPreview() {
+  const trayPreview = document.getElementById('trayPreview');
+  const activeItem = state.selected.find(s => getItemKey(s) === activePreviewKey);
+
+  if (!activeItem) {
+    trayPreview.classList.remove('has-preview');
+    trayPreview.innerHTML = '';
+    return;
+  }
+
+  trayPreview.classList.add('has-preview');
+  trayPreview.innerHTML = activeItem.media_type === 'VIDEO'
+    ? `<video src="${activeItem.image_url}" muted loop playsinline autoplay></video>`
+    : `<img src="${activeItem.image_url}">`;
+
+  document.querySelectorAll('#selectedStrip [data-key]').forEach(el => {
+    el.classList.toggle('active', el.dataset.key === activePreviewKey);
+  });
+}
 
 // ─── Tabs ───────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -461,13 +644,13 @@ document.querySelectorAll('.tab').forEach(tab => {
     clearInterval(videoPollTimer);
 
     if (tab.dataset.view === 'select') {
-      selectView.style.display = 'block';
+      selectView.style.display = '';
     } else if (tab.dataset.view === 'videos') {
-      videosView.style.display = 'block';
+      videosView.style.display = '';
       loadVideos();
       videoPollTimer = setInterval(loadVideos, 15000);
     } else {
-      queueView.style.display = 'block';
+      queueView.style.display = '';
       loadQueue();
     }
   });
@@ -554,7 +737,7 @@ async function loadMedia() {
 
   try {
     const result = await fetchCombinedMedia(state.category);
-    const outfits = combineMedia(result.images, result.videos);
+    const outfits = combineMedia(result.images, result.videos).reverse();
     
     if (outfits.length === 0) {
       selectView.innerHTML = '<div class="empty-state">No media found for this category.</div>';
@@ -705,16 +888,35 @@ function renderSelectionState() {
   const count = state.selected.length;
   if (count > 0) {
     tray.classList.add('open');
+    document.body.classList.add('tray-open');
     const hasVideo = state.selected.some(s => s.media_type === 'VIDEO');
     const type = count === 1 ? (hasVideo ? 'Reel' : 'Single post') : 'Carousel';
     traySummaryText.textContent = `${count} selected — ${type}`;
-    selectedStrip.innerHTML = state.selected.map(s =>
-      s.media_type === 'VIDEO'
-        ? `<video src="${s.image_url}" muted></video>`
-        : `<img src="${s.image_url}">`
-    ).join('');
+    selectedStrip.innerHTML = state.selected.map(s => {
+      const key = getItemKey(s);
+      return s.media_type === 'VIDEO'
+        ? `<video data-key="${key}" src="${s.image_url}" muted></video>`
+        : `<img data-key="${key}" src="${s.image_url}">`;
+    }).join('');
+
+    // Keep showing the same item in the preview if it's still selected;
+    // otherwise default to whatever was just added/changed.
+    if (!state.selected.some(s => getItemKey(s) === activePreviewKey)) {
+      activePreviewKey = getItemKey(state.selected[state.selected.length - 1]);
+    }
+    renderTrayPreview();
+
+    selectedStrip.querySelectorAll('[data-key]').forEach(el => {
+      el.addEventListener('click', () => {
+        activePreviewKey = el.dataset.key;
+        renderTrayPreview();
+      });
+    });
   } else {
     tray.classList.remove('open');
+    document.body.classList.remove('tray-open');
+    activePreviewKey = null;
+    renderTrayPreview();
   }
 }
 
@@ -952,29 +1154,26 @@ document.getElementById('openCaptionModal').addEventListener('click', () => {
 
   const outfitNames = [...new Set(state.selected.map(s => s.outfit_name).filter(Boolean))];
   if (outfitNames.length > 1) {
-    document.getElementById('captionInput').value = `POV: You just found the perfect outfit that makes you feel like a 10/10. ✨ Whether it’s brunch, a date night, or just treating yourself, this look from Myntra is an absolute essential.
-
-Tap the link in my bio to shop this exact look before it sells out! 🛍️
-
-#MyntraFashion #OOTD #AffiliateMarketing #StyleInspo #MyntraFinds #LookOfTheDay
-
-DM "link" for shopping details 🛍️`;
+    document.getElementById('captionInput').value = `Effortless style, zero guesswork ✨ This look is giving main character energy 🎬 Perfect for brunch dates, college fits, or your next reel-worthy moment 💫
+📍 Available on Myntra | Sizes S-XXL | Limited stock
+💬 Comment "LINK" and I'll DM you the direct buy link!
+👗 Follow @shopthelook.daily for daily outfit inspo, styling tips & Myntra fashion finds
+🔔 Turn on post notifications so you never miss a drop
+#MyntraFashion #OOTD #IndianFashionBlogger #MyntraHaul #WomensFashionIndia #StyleInspo #AffordableFashion #MyntraFinds #FashionReels #InstaStyle #DailyOutfit #TrendingNow #ShopTheLook #FashionIndia #GRWM`;
   } else if (outfitNames.length === 1) {
-    document.getElementById('captionInput').value = `POV: You just found the perfect outfit that makes you feel like a 10/10. ✨ Whether it’s brunch, a date night, or just treating yourself, this look from Myntra is an absolute essential.
-
-Tap the link in my bio to shop this exact look before it sells out! ✨
-
-#MyntraFashion #OOTD #AffiliateMarketing #StyleInspo #MyntraFinds #LookOfTheDay
-
-DM "link" for shopping details 🛍️`;
+    document.getElementById('captionInput').value = `Effortless style, zero guesswork ✨ This look is giving main character energy 🎬 Perfect for brunch dates, college fits, or your next reel-worthy moment 💫
+📍 Available on Myntra | Sizes S-XXL | Limited stock
+💬 Comment "LINK" and I'll DM you the direct buy link!
+👗 Follow @shopthelook.daily for daily outfit inspo, styling tips & Myntra fashion finds
+🔔 Turn on post notifications so you never miss a drop
+#MyntraFashion #OOTD #IndianFashionBlogger #MyntraHaul #WomensFashionIndia #StyleInspo #AffordableFashion #MyntraFinds #FashionReels #InstaStyle #DailyOutfit #TrendingNow #ShopTheLook #FashionIndia #GRWM`;
   } else {
-    document.getElementById('captionInput').value = `POV: You just found the perfect outfit that makes you feel like a 10/10. ✨ Whether it’s brunch, a date night, or just treating yourself, this look from Myntra is an absolute essential.
-
-Tap the link in my bio to shop this exact look before it sells out! ✨
-
-#MyntraFashion #OOTD #AffiliateMarketing #StyleInspo #MyntraFinds #LookOfTheDay
-
-DM "link" for shopping details 🛍️`;
+    document.getElementById('captionInput').value = `Effortless style, zero guesswork ✨ This look is giving main character energy 🎬 Perfect for brunch dates, college fits, or your next reel-worthy moment 💫
+📍 Available on Myntra | Sizes S-XXL | Limited stock
+💬 Comment "LINK" and I'll DM you the direct buy link!
+👗 Follow @shopthelook.daily for daily outfit inspo, styling tips & Myntra fashion finds
+🔔 Turn on post notifications so you never miss a drop
+#MyntraFashion #OOTD #IndianFashionBlogger #MyntraHaul #WomensFashionIndia #StyleInspo #AffordableFashion #MyntraFinds #FashionReels #InstaStyle #DailyOutfit #TrendingNow #ShopTheLook #FashionIndia #GRWM`;
   }
 
   const defaultTime = new Date();
