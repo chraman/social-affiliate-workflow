@@ -2,18 +2,12 @@ const express = require('express');
 const { Pool } = require('pg');
 const axios = require('axios');
 const cloudinary = require('cloudinary').v2;
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-const ffprobeStatic = require('ffprobe-static');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
-
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobeStatic.path);
 
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -30,6 +24,13 @@ const MAGIC_HOUR_BASE = 'https://api.magichour.ai/v1';
 const MAGIC_HOUR_MODEL = process.env.MAGIC_HOUR_MODEL || 'ltx-2.3';
 const MAGIC_HOUR_RESOLUTION = process.env.MAGIC_HOUR_RESOLUTION || '720p';
 const MAGIC_HOUR_DURATION_SECONDS = Number(process.env.MAGIC_HOUR_DURATION_SECONDS || 2);
+
+// ─── LTX Config ───────────────────────────────────────────
+const LTX_API_KEY = process.env.LTX_API_KEY;
+const LTX_BASE = 'https://api.ltx.io/v2';
+const LTX_MODEL = process.env.LTX_MODEL || 'ltx-2-3-fast';
+const LTX_RESOLUTION = process.env.LTX_RESOLUTION || '1080x1920';
+const LTX_DURATION_SECONDS = Number(process.env.LTX_DURATION_SECONDS || 2);
 
 // ─── Basic Auth Setup ────────────────────────────────────────────
 const DASH_USER = process.env.DASH_USER || 'admin';
@@ -79,7 +80,7 @@ function getFolderFromCloudinaryUrl(url) {
 }
 
 // ─── Magic Hour Helpers ──────────────────────────────────────────
-async function startImageToVideo(imageUrl, userPrompt) {
+async function startImageToVideoUsingMH(imageUrl, userPrompt) {
   const res = await axios.post(`${MAGIC_HOUR_BASE}/image-to-video`, {
     name: `VisionCraft video ${Date.now()}`,
     assets: { image_file_path: imageUrl },
@@ -87,11 +88,13 @@ async function startImageToVideo(imageUrl, userPrompt) {
     model: MAGIC_HOUR_MODEL,
     resolution: MAGIC_HOUR_RESOLUTION,
     style: {
-      prompt: `2-second realistic fashion video. Keep the camera completely static. Preserve the exact framing, perspective, lighting, background, outfit, handbag, phone position, and composition. The phone must remain covering the face throughout the video.
+      prompt: `2-second realistic fashion video. Keep the camera completely static. Preserve the exact framing, perspective, lighting, background, outfit, handbag, phone position, and composition.
 
-The model makes one very small natural step forward, moving only a few centimeters toward the camera while maintaining the same body orientation. The movement is smooth and slow, with a slight transfer of body weight. The handbag swings gently from the motion. The hair moves subtly and settles naturally. The outfit fabric responds with minimal realistic movement.
+The model's face must remain fully hidden and out of frame for the entire duration of the video — completely blocked by the phone at all times, with zero visibility of eyes, nose, mouth, or facial features at any frame, including the first and last frame.
 
-Do not change the pose, do not rotate the body, do not reveal the face, do not move the phone, do not change the outfit, do not zoom, pan, tilt, crop, or change the camera angle. Maintain identity, body proportions, clothing details, and background exactly.`
+The model makes one very small natural step forward, moving only a few centimeters toward the camera while maintaining the same body orientation. The movement is smooth and slow, with a slight transfer of body weight. The handbag swings gently from the motion. The hair moves subtly and settles naturally, without shifting away from the face or phone area. The outfit fabric responds with minimal realistic movement.
+
+Do not change the pose, do not rotate the body, do not tilt the head, do not lower or raise the phone, do not reveal any part of the face at any point, do not move the phone away from the face, do not change the outfit, do not zoom, pan, tilt, crop, or change the camera angle. Maintain identity, body proportions, clothing details, and background exactly. The face must stay 100% obscured by the phone in every single frame.`
     }
   }, {
     headers: {
@@ -102,6 +105,37 @@ Do not change the pose, do not rotate the body, do not reveal the face, do not m
   return res.data.id;
 }
 
+// ─── LTX Helpers ──────────────────────────────────────────
+async function startImageToVideoUsingLTX(imageUrl, userPrompt) {
+  let forwardStepPrompt = `2-second realistic fashion video. Keep the camera completely static. Preserve the exact framing, perspective, lighting, background, outfit, handbag, phone position, and composition.
+
+The model's face must remain fully hidden and out of frame for the entire duration of the video — completely blocked by the phone at all times, with zero visibility of eyes, nose, mouth, or facial features at any frame, including the first and last frame.
+
+The model makes one very small natural step forward, moving only a few centimeters toward the camera while maintaining the same body orientation. The movement is smooth and slow, with a slight transfer of body weight. The handbag swings gently from the motion. The hair moves subtly and settles naturally, without shifting away from the face or phone area. The outfit fabric responds with minimal realistic movement.
+
+Do not change the pose, do not rotate the body, do not tilt the head, do not lower or raise the phone, do not reveal any part of the face at any point, do not move the phone away from the face, do not change the outfit, do not zoom, pan, tilt, crop, or change the camera angle. Maintain identity, body proportions, clothing details, and background exactly. The face must stay 100% obscured by the phone in every single frame.`;
+  let legChangePrompt = `2-second realistic fashion video. Keep the camera completely static. Preserve the exact framing, perspective, lighting, background, outfit, handbag, phone position, and composition.
+
+The model's face must remain fully hidden and out of frame for the entire duration of the video — completely blocked by the phone at all times, with zero visibility of eyes, nose, mouth, or facial features at any frame, including the first and last frame.
+
+The model performs a slow, gentle weight shift from one leg to the other, staying in place with the same body orientation. This subtle sway causes the skirt or dress hem to swing and flow naturally, showcasing the drape and movement of the outfit fabric. The handbag sways gently in response to the motion. The hair moves subtly and settles naturally, without shifting away from the face or phone area.
+
+Do not change the pose, do not rotate the body, do not tilt the head, do not lower or raise the phone, do not reveal any part of the face at any point, do not move the phone away from the face, do not change the outfit, do not zoom, pan, tilt, crop, or change the camera angle. Maintain identity, body proportions, clothing details, and background exactly. The face must stay 100% obscured by the phone in every single frame.`
+  const res = await axios.post(`${LTX_BASE}/image-to-video`, {
+    image_uri: imageUrl,
+    model: LTX_MODEL,              // e.g. 'ltx-2-3-pro' (ltx-2-fast/ltx-2-pro are deprecated)
+    duration: LTX_DURATION_SECONDS, // check supported durations per model
+    resolution: LTX_RESOLUTION,     // e.g. '1920x1080'
+    generate_audio: false,          // no need for AI audio on this clip
+    prompt:  legChangePrompt 
+    }, {
+    headers: {
+      Authorization: `Bearer ${LTX_API_KEY}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  return res.data.id;
+}
 // ─── FFmpeg Video Combiner Config & Logic ───────────────────────
 // 1. Updated defaults to standard 9:16 Reels format (1080x1920)
 const COMBINE_WIDTH = Number(process.env.COMBINE_WIDTH || 1080);
@@ -109,7 +143,10 @@ const COMBINE_HEIGHT = Number(process.env.COMBINE_HEIGHT || 1920);
 const COMBINE_FPS = Number(process.env.COMBINE_FPS || 30);
 const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS || 2);
 
-async function runCombineJob(videoRowId, items) {
+const { generateAnimatedSticker } = require('./animated-sticker');
+
+// Add a stickerText param (pass the caption you want jumping on the first image)
+async function runCombineJob(videoRowId, items, stickerText) {
   try {
     if (!items || items.length === 0) {
       throw new Error("No items provided to combine.");
@@ -122,38 +159,38 @@ async function runCombineJob(videoRowId, items) {
 
     if (baseVideoIndex !== -1) {
       basePublicId = getPublicIdFromCloudinaryUrl(items[baseVideoIndex].image_url);
-    } else { 
+    } else {
       isOnlyImages = true;
-        const firstImagePublicId = getPublicIdFromCloudinaryUrl(items[0].image_url);
-        if (!firstImagePublicId) {
-          throw new Error("Could not determine first image public ID.");
-        }
+      const firstImagePublicId = getPublicIdFromCloudinaryUrl(items[0].image_url);
+      if (!firstImagePublicId) {
+        throw new Error("Could not determine first image public ID.");
+      }
 
         // Generate a short video from the first image
-        const imageVideoUrl = cloudinary.url(firstImagePublicId, {
-          resource_type: "image",
-          format: "mp4",
-          transformation: [
-            {
-              width: COMBINE_WIDTH,
-              height: COMBINE_HEIGHT,
-              crop: "fill",
-              effect: "zoompan",
-              duration: COMBINE_IMAGE_HOLD_SECONDS,
-              fps: COMBINE_FPS
-            }
-          ]
-        });
+      const imageVideoUrl = cloudinary.url(firstImagePublicId, {
+        resource_type: "image",
+        format: "mp4",
+        transformation: [
+          {
+            width: COMBINE_WIDTH,
+            height: COMBINE_HEIGHT,
+            crop: "fill",
+            effect: "zoompan:du_"+COMBINE_IMAGE_HOLD_SECONDS+";maxzoom_1.2",
+            duration: COMBINE_IMAGE_HOLD_SECONDS,
+            fps: COMBINE_FPS
+          }
+        ]
+      });
 
         // Upload it as a video asset
-        const baseVideo = await cloudinary.uploader.upload(imageVideoUrl, {
-          resource_type: "video",
-          folder: getFolderFromCloudinaryUrl(items[0].image_url),
-          public_id: `combine_base_${videoRowId}`,
-          overwrite: true
-        });
+      const baseVideo = await cloudinary.uploader.upload(imageVideoUrl, {
+        resource_type: "video",
+        folder: getFolderFromCloudinaryUrl(items[0].image_url),
+        public_id: `combine_base_${videoRowId}`,
+        overwrite: true
+});
 
-        basePublicId = baseVideo.public_id;
+      basePublicId = baseVideo.public_id;
     }
 
     if (!basePublicId) {
@@ -161,22 +198,45 @@ async function runCombineJob(videoRowId, items) {
     }
 
     // Shared layout configuration applied to every canvas state
-    const canvasLayout = { 
-      width: COMBINE_WIDTH, 
-      height: COMBINE_HEIGHT, 
-      crop: 'fill', 
-      fps: COMBINE_FPS 
+    const canvasLayout = {
+      width: COMBINE_WIDTH,
+      height: COMBINE_HEIGHT,
+      crop: 'fill',
+      fps: COMBINE_FPS
     };
 
     // Initialize canvas transformation layout
     const transformation = [ canvasLayout ];
 
-    // Snappy fast transition speed (0.3 seconds)
+    // --- NEW: bounce-in sticker on the first image only -------------------
+    // Only meaningful when the first segment of the timeline IS items[0] —
+    // true for the isOnlyImages path, and true for mixed media when the
+    // base video is item 0. (If baseVideoIndex > 0 in mixed media, item 0
+    // gets prepended later and this overlay would land on the wrong asset —
+    // handle that case separately if you hit it.)
+    if (stickerText && (isOnlyImages || baseVideoIndex === 0)) {
+      const stickerPublicId = await generateAnimatedSticker(stickerText, {
+        fps: COMBINE_FPS,
+        totalDurationSec: COMBINE_IMAGE_HOLD_SECONDS,
+        folder: getFolderFromCloudinaryUrl(items[0].image_url) || 'sticker-tests/animated',
+        publicId: `sticker-anim-${videoRowId}`, // unique per job — avoids stale-cache issues
+      });
+
+      transformation.push({
+        overlay: `video:${stickerPublicId.replace(/\//g, ':')}`,
+        gravity: 'north',
+        y: 40,
+        start_offset: 0,
+      });
+      transformation.push({ flags: 'layer_apply' });
+    }
+    // ------------------------------------------------------------------------
+
     const fastTransition = 'transition_(name_fade;du_0.3)';
 
     if (isOnlyImages) {
       // Scenario A: Only images exist.
-      for (let i = 0; i < items.length; i++) {
+      for (let i = 1; i < items.length; i++) {
         const item = items[i];
         const publicId = getPublicIdFromCloudinaryUrl(item.image_url);
         if (!publicId) continue;
@@ -185,13 +245,12 @@ async function runCombineJob(videoRowId, items) {
         transformation.push({
           overlay: formattedId,
           flags: `splice:${fastTransition}`,
-          duration: COMBINE_IMAGE_HOLD_SECONDS, // Used config variable
-          effect: 'zoompan'
+          duration: COMBINE_IMAGE_HOLD_SECONDS, 
+          effect: "zoompan:du_"+COMBINE_IMAGE_HOLD_SECONDS+";maxzoom_1.2",
         });
         transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply' });
       }
-      transformation.push({ start_offset: 15.0 });
     } else {
       // Scenario B: Mixed media.
       // 1. Prepend assets
@@ -206,7 +265,7 @@ async function runCombineJob(videoRowId, items) {
         transformation.push({
           overlay: isVideo ? `video:${formattedId}` : formattedId,
           flags: `splice:${fastTransition}`,
-          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan' })
+          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan:du_'+COMBINE_IMAGE_HOLD_SECONDS+';maxzoom_1.2' })
         });
         transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply', start_offset: 0 });
@@ -224,7 +283,7 @@ async function runCombineJob(videoRowId, items) {
         transformation.push({
           overlay: isVideo ? `video:${formattedId}` : formattedId,
           flags: `splice:${fastTransition}`,
-          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan' })
+          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan:du_'+COMBINE_IMAGE_HOLD_SECONDS+';maxzoom_1.2' })
         });
         transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply' });
@@ -232,10 +291,10 @@ async function runCombineJob(videoRowId, items) {
     }
 
     // 2. FORCED INSTAGRAM COMPLIANCE: Lock down video/audio codecs and quality
-    transformation.push({ 
-      video_codec: 'h264', 
-      audio_codec: 'aac', 
-      quality: 'auto' 
+    transformation.push({
+      video_codec: 'h264',
+      audio_codec: 'aac',
+      quality: 'auto'
     });
 
     // Build the dynamic manipulation URL
@@ -246,9 +305,10 @@ async function runCombineJob(videoRowId, items) {
 
     // 3. FORCED EXTENSION: Explicitly save target as an MP4 file
     const folder = getFolderFromCloudinaryUrl(items[0].image_url);
+    console.log(sourceUrl)
     const uploadResult = await cloudinary.uploader.upload(sourceUrl, {
       resource_type: 'video',
-      format: 'mp4', 
+      format: 'mp4',
       folder: folder || undefined,
       public_id: `combined_${videoRowId}`,
       overwrite: true
@@ -442,7 +502,7 @@ app.post('/api/videos/generate', async (req, res) => {
     return res.status(500).json({ error: 'MAGIC_HOUR_API_KEY not configured on the server' });
   }
   try {
-    const projectId = await startImageToVideo(image_url, prompt);
+    const projectId = await startImageToVideoUsingLTX(image_url, prompt);
     const parsedProductId = parseInt(product_id, 10);
     const insertRes = await pool.query(
       `INSERT INTO product_videos (product_id, source_image_id, source_image_url, magic_hour_project_id, status, prompt, product_ids)

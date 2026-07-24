@@ -41,10 +41,12 @@ client.on('authenticated', () => console.log('✅ WhatsApp authenticated'));
 client.on('ready', () => console.log('🟢 Bot is ready and listening...\n'));
 const SELF_CHAT_ID = "124644464017605@lid";
 client.on('message_create', async (msg) => {
+    // console.log("here", msg)
     const text = msg.body?.trim();
     if (!text || msg.body.includes(BOT_SIGNATURE)) return;
     const chat = await msg.getChat();
-    if (chat.name !== 'cheky') return;
+    // console.log("here", chat)
+    if (chat.name !== 'cheky' && chat.name !=='+91 83760 64139') return;
 
     const chatId = chat.id._serialized;
 
@@ -63,7 +65,9 @@ const categoriesArray = [
     "Cotton wear saree for everyday",
     "Short Kurti",
     "Suits",
-    "Top and shirts"
+    "Top and shirts",
+    "Kurta with Plazzo",
+    "One Piece"
 ]
 async function handleNewProduct(msg, chat, url) {
     const chatId = chat.id._serialized;
@@ -79,7 +83,7 @@ async function handleNewProduct(msg, chat, url) {
 
         product.myntraUrl = url;
         product.affiliateLink = affiliateUrl;
-        product.category = categoriesArray[0]
+        product.category = categoriesArray[7]
         const dbProduct = await createProduct(product);
         log("DB_SAVED", chatId, `Product #${dbProduct.id} saved`);
 

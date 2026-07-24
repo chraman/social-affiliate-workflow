@@ -14,6 +14,9 @@ cloudinary.config({
 const MAGIC_HOUR_API_KEY = process.env.MAGIC_HOUR_API_KEY;
 const MAGIC_HOUR_BASE = 'https://api.magichour.ai/v1';
 
+const LTX_API_KEY = process.env.LTX_API_KEY;
+const LTX_BASE = 'https://api.ltx.io/v2';
+
 // How long to keep polling a single job before giving up and marking it failed.
 const MAX_JOB_AGE_MS = 6 * 60 * 60 * 1000; // 30 min
 
@@ -47,6 +50,13 @@ async function checkVideoStatus(projectId) {
     headers: { Authorization: `Bearer ${MAGIC_HOUR_API_KEY}` }
   });
   return res.data; // expect { status: 'complete'|'error'|'processing'|..., downloads: [{ url }], error }
+}
+
+async function checkVideoStatusUsingLTX(jobId) {
+  const res = await axios.get(`${LTX_BASE}/image-to-video/${jobId}`, {
+    headers: { Authorization: `Bearer ${LTX_API_KEY}` }
+  });
+  return res.data; // { id, status: 'pending'|'processing'|'completed'|'failed', result: { video_url }, error, created_at, completed_at }
 }
 
 async function handleCompletedJob(job, downloadUrl) {
@@ -104,11 +114,12 @@ async function processVideoJobs() {
     if (!job.magic_hour_project_id) continue;
 
     try {
-      const data = await checkVideoStatus(job.magic_hour_project_id);
+      const data = await checkVideoStatusUsingLTX(job.magic_hour_project_id);
+      console.log(data)
       const status = (data.status || '').toLowerCase();
 
       if (status === 'complete' || status === 'completed') {
-        const downloadUrl = data.downloads?.[0]?.url;
+        const downloadUrl = data.result?.video_url || data.downloads?.[0]?.url; 
         if (!downloadUrl) {
           throw new Error('Magic Hour reported complete but returned no download URL');
         }

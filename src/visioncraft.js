@@ -96,6 +96,27 @@ const TEMPLATE_ARRAY = [
 
                     The model must be actively styled with these items. Ensure the footwear matches the pose naturally, the jewelry (rings/bracelets) is visible on the hands holding or near the phone, and any bags or accessories are integrated realistically into the mirror selfie scene (e.g., slung over her shoulder, resting on nearby furniture, or held naturally).`
   
+  },
+  {
+    templateId: 6,
+    templateDescription: "office selfie image, white background, white phone insta optimised",
+    aspectRation:"9:16",
+    templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmrrota4r0011da6g57dxhcul.png",
+    templatePrompt: 
+    `A confident woman stands centered in a minimalist office, capturing a full-body mirror selfie with her phone obscuring her face, her dark, wavy hair cascading naturally. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, and overall composition in every generation.
+     Modify ONLY her outfit, accessories, jewelry, and footwear based on the specifications below. The entire ensemble must fit naturally onto the model while strictly preserving the original pose and composition.
+    ---
+    ### 👗 CLOTHING SPECIFICATION:
+    [INJECT_CLOTHING_DESCRIPTION]
+
+    The outfit must exactly match this product specification, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction.
+
+    ---
+    ### 👜 ACCESSORIES, JEWELRY, & FOOTWEAR SPECIFICATION:
+    [INJECT_ACCESSORIES_DESCRIPTION]
+
+    The model must be actively styled with these items. Ensure the footwear matches the pose naturally, the jewelry (rings/bracelets) is visible on the hands holding or near the phone, and any bags or accessories are integrated realistically into the mirror selfie scene (e.g., slung over her shoulder, resting on nearby furniture, or held naturally).`
+  
   }
 ]
 
@@ -313,8 +334,8 @@ async function generateInfluencerImage(productImageUrl) {
     // Subscribe BEFORE triggering — avoids race condition where
     // job completes before we subscribe
     console.log('🎨 Triggering AI template + Product generation...');
-    let templateImageUrl = TEMPLATE_ARRAY[3].templateUrl
-    let prompt = TEMPLATE_ARRAY[3].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
+    let templateImageUrl = TEMPLATE_ARRAY[4].templateUrl
+    let prompt = TEMPLATE_ARRAY[4].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
     // Accesseries, jewelry and footware should be based on the prodct category
     const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
     // console.log(`🆔 Job ID: ${jobId}`);

@@ -1,64 +1,50 @@
-const axios = require('axios');
-require('dotenv').config();
+/**
+ * Builds a Myntra affiliate link by stripping any existing query params
+ * off the product URL and attaching our own affiliate tracking params.
+ */
 
-const CUELINKS_API = 'https://cl-api.cuetag.in/api/shortUrl';
+const AFFILIATE_PARAMS = {
+  utm_source: 'ugc_affiliate',
+  utm_medium: 'social_share_pdp',
+  utm_campaign: 'vDS35zK69O',
+  shared: 'true',
+  affiliate_id: 'vDS35zK69O',
+};
 
 /**
- * Converts a Myntra URL into a CueLinks affiliate tracking URL.
- * Falls back to original URL if CueLinks API fails.
+ * Converts a Myntra product URL into our own affiliate tracking URL by
+ * dropping whatever query params it already has and attaching ours.
+ * Falls back to the original URL if it can't be parsed.
  *
  * @param {string} originalUrl
- * @returns {Promise<string>} affiliate URL
+ * @returns {string} affiliate URL
  */
-async function buildAffiliateLinkCuelinks(originalUrl) {
-  const apiKey = process.env.CUELINKS_API_KEY;
-
-  if (!apiKey) {
-    console.warn('⚠️  CUELINKS_API_KEY not set — returning original URL');
-    return originalUrl;
-  }
+function buildAffiliateLink(originalUrl) {
+  if (!originalUrl) return originalUrl;
 
   try {
-    const response = await axios.post(
-      CUELINKS_API,
-      { url: originalUrl },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        timeout: 8000,
-      }
-    );
+    const url = new URL(originalUrl);
 
-    const affiliateUrl =
-      response.data?.short_url ||
-      response.data?.data?.short_url ||
-      response.data?.url;
+    // Remove all existing query params.
+    url.search = '';
 
-    if (affiliateUrl) {
-      console.log('🔗 Affiliate link:', affiliateUrl);
-      return affiliateUrl;
+    // Attach our affiliate params.
+    for (const [key, value] of Object.entries(AFFILIATE_PARAMS)) {
+      url.searchParams.set(key, value);
     }
 
-    console.warn('⚠️  CueLinks returned unexpected response:', response.data);
-    return originalUrl;
+    const affiliateUrl = url.toString();
+    console.log('🔗 Affiliate link:', affiliateUrl);
+    return affiliateUrl;
   } catch (err) {
-    console.error('❌ CueLinks API error:', err.message);
+    console.error('❌ Failed to build affiliate link:', err.message);
     return originalUrl; // graceful fallback
   }
 }
 
-/**
- * Alternative: build a CueLinks tracking URL without an API call
- * (uses CueLinks redirect pattern — check your dashboard for your Publisher ID)
- *
- * @param {string} originalUrl
- * @param {string} publisherId - your CueLinks publisher ID
- */
-function buildAffiliateLinkDirect(originalUrl, publisherId) {
-  const encoded = encodeURIComponent(originalUrl);
-  return `https://clnk.in/track?pid=${publisherId}&url=${encoded}`;
-}
-
-module.exports = { buildAffiliateLinkCuelinks, buildAffiliateLinkDirect };
+module.exports = {
+  buildAffiliateLink,
+  // Aliases kept so existing call sites don't need to change their imports.
+  buildAffiliateLinkCuelinks: buildAffiliateLink,
+  buildAffiliateLinkDirect: buildAffiliateLink,
+};
