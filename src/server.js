@@ -9,6 +9,14 @@ const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
 
+// Same helper modules the WhatsApp bot (index.js) uses — reused here so the
+// "Add Product" tab runs through the exact same scrape/generate/save logic.
+const { scrapeMyntraProduct } = require('./scraper');
+const { buildAffiliateLinkCuelinks } = require('./affiliate');
+const { formatWhatsAppMessage } = require('./formatter');
+const { generateInfluencerImage } = require('./visioncraft');
+const { createProduct, uploadImagesForProduct } = require('./pipeline');
+
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -127,7 +135,7 @@ Do not change the pose, do not rotate the body, do not tilt the head, do not low
     duration: LTX_DURATION_SECONDS, // check supported durations per model
     resolution: LTX_RESOLUTION,     // e.g. '1920x1080'
     generate_audio: false,          // no need for AI audio on this clip
-    prompt:  legChangePrompt 
+    prompt:  forwardStepPrompt 
     }, {
     headers: {
       Authorization: `Bearer ${LTX_API_KEY}`,
@@ -329,6 +337,16 @@ async function runCombineJob(videoRowId, items, stickerText) {
   }
 }
 
+// ─── Add Product tab: in-memory session store ────────────────────
+// Mirrors index.js's `pendingSelections` map, just keyed by a generated
+// session id (from the browser) instead of a WhatsApp chat id.
+const pendingImports = new Map(); // sessionId -> { product, affiliateUrl }
+const IMPORT_SESSION_TTL_MS = 30 * 60 * 1000; // 30 min
+
+function scheduleImportSessionCleanup(sessionId) {
+  setTimeout(() => pendingImports.delete(sessionId), IMPORT_SESSION_TTL_MS).unref?.();
+}
+
 // ─── API Routes ──────────────────────────────────────────────────
 
 app.get('/api/categories', async (req, res) => {
@@ -344,6 +362,90 @@ app.get('/api/categories', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Add Product tab (same flow as the WhatsApp bot: paste link → pick
+// images → generate AI looks), driven from the browser instead of chat ──
+
+app.post('/api/products/scrape', async (req, res) => {
+  const { url, category } = req.body || {};
+
+  if (!url || !/^https?:\/\/(www\.)?myntra\.com\//i.test(url)) {
+    return res.status(400).json({ error: 'A valid Myntra product link is required.' });
+  }
+
+  try {
+    const product = await scrapeMyntraProduct(url);
+    const affiliateUrl = await buildAffiliateLinkCuelinks(url);
+
+    product.myntraUrl = url;
+    product.affiliateLink = affiliateUrl;
+    product.category = category || product.category;
+
+    const dbProduct = await createProduct(product);
+
+    const sessionId = crypto.randomUUID();
+    pendingImports.set(sessionId, { product, affiliateUrl });
+    scheduleImportSessionCleanup(sessionId);
+
+    res.json({
+      sessionId,
+      product: {
+        id: dbProduct.id,
+        name: product.name,
+        price: product.price,
+        images: product.images,
+        category: product.category
+      }
+    });
+  } catch (err) {
+    console.error('[import] scrape failed:', err);
+    res.status(500).json({ error: 'Failed to fetch product details: ' + err.message });
+  }
+});
+
+app.post('/api/products/:sessionId/generate-image', async (req, res) => {
+  const { sessionId } = req.params;
+  const { imageUrl } = req.body || {};
+
+  const pending = pendingImports.get(sessionId);
+  if (!pending) {
+    return res.status(404).json({ error: 'Session expired. Please fetch the product again.' });
+  }
+  if (!imageUrl) {
+    return res.status(400).json({ error: 'imageUrl is required.' });
+  }
+
+  try {
+    const aiImageUrl = await generateInfluencerImage(imageUrl);
+    if (!aiImageUrl) {
+      return res.status(500).json({ error: 'Generation returned no image.' });
+    }
+    res.json({ url: aiImageUrl });
+  } catch (err) {
+    console.error('[import] generate-image failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/products/:sessionId/finalize', async (req, res) => {
+  const { sessionId } = req.params;
+  const { generatedUrls } = req.body || {};
+
+  const pending = pendingImports.get(sessionId);
+  if (!pending) {
+    return res.status(404).json({ error: 'Session expired. Please fetch the product again.' });
+  }
+
+  try {
+    await uploadImagesForProduct(pending.product, generatedUrls || []);
+    const caption = formatWhatsAppMessage(pending.product, pending.affiliateUrl);
+    pendingImports.delete(sessionId);
+    res.json({ success: true, caption });
+  } catch (err) {
+    console.error('[import] finalize failed:', err);
     res.status(500).json({ error: err.message });
   }
 });

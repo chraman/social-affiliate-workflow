@@ -402,6 +402,48 @@
     padding: 0 20px 10px;
   }
 
+  /* Add Product tab */
+  #importFormCard { padding: 14px; }
+  #importResult .outfit-header { display: block; padding-bottom: 6px; }
+  #importResult .import-hint {
+    padding: 0 12px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .import-actions {
+    padding: 12px;
+    display: flex;
+    gap: 8px;
+  }
+  .import-actions .btn { flex: 1; }
+  .image-tile.import-tile.selected .check { background: var(--accent); border-color: var(--accent); }
+  .import-status-badge {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    right: 6px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 0;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.65);
+    color: var(--text-dim);
+    z-index: 2;
+  }
+  .import-status-badge.status-processing { color: #e0c069; }
+  .import-status-badge.status-done { color: var(--success); }
+  .import-status-badge.status-failed { color: var(--danger); }
+  .import-success {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+  .import-success .btn { margin-top: 10px; }
+
   /* ───────────────────────────────────────────────────────
      Desktop layout (≥900px)
      Structure, ids, classes and JS behavior are unchanged —
@@ -539,12 +581,29 @@
     <div class="tab active" data-view="select">Select Media</div>
     <div class="tab" data-view="videos">Video Queue</div>
     <div class="tab" data-view="queue">Queue</div>
+    <div class="tab" data-view="add">Add Product</div>
   </div>
 </header>
 
 <main id="selectView"></main>
 <main id="videosView" style="display:none;"></main>
 <main id="queueView" style="display:none;"></main>
+<main id="addView" style="display:none;">
+  <div class="outfit-card" id="importFormCard">
+    <div class="outfit-header" style="display:block;">
+      <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px;">Myntra product link</label>
+      <input type="text" id="importUrlInput" placeholder="https://www.myntra.com/..."
+        style="width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-size:14px;font-family:inherit;">
+
+      <label style="font-size:12px;color:var(--text-dim);display:block;margin:12px 0 6px;">Category</label>
+      <select id="importCategorySelect"></select>
+
+      <button class="btn full" id="importFetchBtn" style="margin-top:14px;">Fetch Product</button>
+      <div id="importFetchError" style="display:none;color:var(--danger);font-size:12px;margin-top:8px;"></div>
+    </div>
+  </div>
+  <div id="importResult"></div>
+</main>
 
 <button class="float-tray-toggle" id="trayToggle" style="display:none;"></button>
 
@@ -600,6 +659,7 @@ const state = {
 const selectView = document.getElementById('selectView');
 const videosView = document.getElementById('videosView');
 const queueView = document.getElementById('queueView');
+const addView = document.getElementById('addView');
 const categorySelect = document.getElementById('categorySelect');
 const tray = document.getElementById('tray');
 const traySummaryText = document.getElementById('traySummaryText');
@@ -641,6 +701,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     selectView.style.display = 'none';
     videosView.style.display = 'none';
     queueView.style.display = 'none';
+    addView.style.display = 'none';
     clearInterval(videoPollTimer);
 
     if (tab.dataset.view === 'select') {
@@ -649,9 +710,12 @@ document.querySelectorAll('.tab').forEach(tab => {
       videosView.style.display = '';
       loadVideos();
       videoPollTimer = setInterval(loadVideos, 15000);
-    } else {
+    } else if (tab.dataset.view === 'queue') {
       queueView.style.display = '';
       loadQueue();
+    } else if (tab.dataset.view === 'add') {
+      addView.style.display = '';
+      initImportTab();
     }
   });
 });
@@ -1276,6 +1340,239 @@ async function deleteQueueItem(id) {
   } catch (err) {
     alert('Error deleting queue item: ' + err.message);
   }
+}
+
+// ─── Add Product tab (same flow as the WhatsApp bot: paste link →
+// scrape → pick images → generate AI looks → save), just without chat ──
+const IMPORT_CATEGORIES = [
+  "Ethnic Female Co-ord Set",
+  "Midi Dress",
+  "Cotton wear saree for everyday",
+  "Short Kurti",
+  "Suits",
+  "Top and shirts",
+  "Kurta with Plazzo",
+  "One Piece",
+  "Saree"
+];
+
+const importState = {
+  sessionId: null,
+  product: null,
+  selected: new Set(), // selected image URLs
+  categoriesLoaded: false
+};
+
+const importUrlInput = document.getElementById('importUrlInput');
+const importCategorySelect = document.getElementById('importCategorySelect');
+const importFetchBtn = document.getElementById('importFetchBtn');
+const importFetchError = document.getElementById('importFetchError');
+const importResult = document.getElementById('importResult');
+
+function initImportTab() {
+  if (!importState.categoriesLoaded) {
+    importCategorySelect.innerHTML = IMPORT_CATEGORIES
+      .map((c, i) => `<option value="${c}" ${i === IMPORT_CATEGORIES.length - 1 ? 'selected' : ''}>${c}</option>`)
+      .join('');
+    importState.categoriesLoaded = true;
+  }
+}
+
+const extractMyntraUrlWeb = (text) => text.match(/https?:\/\/(www\.)?myntra\.com\/[^\s]+/i)?.[0];
+
+importFetchBtn.addEventListener('click', handleImportFetch);
+
+async function handleImportFetch() {
+  const rawText = importUrlInput.value.trim();
+  const url = extractMyntraUrlWeb(rawText);
+  importFetchError.style.display = 'none';
+
+  if (!url) {
+    importFetchError.textContent = 'Paste a valid Myntra product link.';
+    importFetchError.style.display = 'block';
+    return;
+  }
+
+  importFetchBtn.disabled = true;
+  importFetchBtn.textContent = 'Fetching…';
+  importResult.innerHTML = '<div class="empty-state">Scraping product & generating collage…</div>';
+
+  try {
+    const res = await fetch('/api/products/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, category: importCategorySelect.value })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      importResult.innerHTML = '';
+      importFetchError.textContent = data.error || 'Failed to fetch product details.';
+      importFetchError.style.display = 'block';
+      return;
+    }
+
+    importState.sessionId = data.sessionId;
+    importState.product = data.product;
+    importState.selected = new Set();
+    renderImportResult();
+  } catch (err) {
+    importResult.innerHTML = '';
+    importFetchError.textContent = 'Error: ' + err.message;
+    importFetchError.style.display = 'block';
+  } finally {
+    importFetchBtn.disabled = false;
+    importFetchBtn.textContent = 'Fetch Product';
+  }
+}
+
+function renderImportResult() {
+  const product = importState.product;
+  const images = product.images || [];
+
+  importResult.innerHTML = `
+    <div class="outfit-card">
+      <div class="outfit-header">
+        <span class="outfit-name">${product.name || 'Product'}</span>
+        <span class="outfit-price">₹${product.price || '-'}</span>
+      </div>
+      <div class="import-hint">📸 Choose image(s) to convert to AI styled looks:</div>
+      <div class="image-grid" id="importImageGrid">
+        ${images.map((imgUrl, i) => `
+          <div class="media-tile image-tile import-tile" data-index="${i}" data-image-url="${imgUrl}">
+            <img src="${imgUrl}" loading="lazy">
+            <div class="check"></div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="import-actions">
+        <button class="btn secondary" id="importSelectAllBtn">Select All</button>
+        <button class="btn" id="importGenerateBtn" disabled>Generate AI Images (0)</button>
+      </div>
+    </div>
+  `;
+
+  importResult.querySelectorAll('.import-tile').forEach(tile => {
+    tile.addEventListener('click', () => toggleImportTile(tile));
+  });
+
+  document.getElementById('importSelectAllBtn').addEventListener('click', () => {
+    const allSelected = importState.selected.size === images.length;
+    importResult.querySelectorAll('.import-tile').forEach(tile => {
+      tile.classList.toggle('selected', !allSelected);
+    });
+    importState.selected = new Set(allSelected ? [] : images);
+    updateImportGenerateButton();
+  });
+
+  document.getElementById('importGenerateBtn').addEventListener('click', generateImportImages);
+}
+
+function toggleImportTile(tile) {
+  const imageUrl = tile.dataset.imageUrl;
+  if (importState.selected.has(imageUrl)) {
+    importState.selected.delete(imageUrl);
+    tile.classList.remove('selected');
+  } else {
+    importState.selected.add(imageUrl);
+    tile.classList.add('selected');
+  }
+  updateImportGenerateButton();
+}
+
+function updateImportGenerateButton() {
+  const btn = document.getElementById('importGenerateBtn');
+  if (!btn) return;
+  const count = importState.selected.size;
+  btn.textContent = `Generate AI Images (${count})`;
+  btn.disabled = count === 0;
+}
+
+function setImportTileStatus(tile, status, label) {
+  let badge = tile.querySelector('.import-status-badge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'import-status-badge';
+    tile.appendChild(badge);
+  }
+  badge.className = `import-status-badge status-${status}`;
+  badge.textContent = label;
+}
+
+async function generateImportImages() {
+  const generateBtn = document.getElementById('importGenerateBtn');
+  const selectAllBtn = document.getElementById('importSelectAllBtn');
+  const selectedUrls = Array.from(importState.selected);
+  if (selectedUrls.length === 0) return;
+
+  generateBtn.disabled = true;
+  selectAllBtn.disabled = true;
+  generateBtn.textContent = 'Generating…';
+
+  const generatedUrls = [];
+
+  // Process one at a time, same as the WhatsApp bot loop, so progress
+  // shows per-image on each tile as it completes.
+  for (const imageUrl of selectedUrls) {
+    const tile = importResult.querySelector(`.import-tile[data-image-url="${CSS.escape(imageUrl)}"]`);
+    if (tile) setImportTileStatus(tile, 'processing', 'Generating…');
+
+    try {
+      const res = await fetch(`/api/products/${importState.sessionId}/generate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.url) {
+        generatedUrls.push(data.url);
+        if (tile) setImportTileStatus(tile, 'done', 'Done ✓');
+      } else {
+        if (tile) setImportTileStatus(tile, 'failed', 'Failed');
+      }
+    } catch (err) {
+      if (tile) setImportTileStatus(tile, 'failed', 'Failed');
+    }
+  }
+
+  try {
+    const finalizeRes = await fetch(`/api/products/${importState.sessionId}/finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generatedUrls })
+    });
+    const finalizeData = await finalizeRes.json();
+
+    if (finalizeRes.ok) {
+      importResult.innerHTML = `
+        <div class="import-success">
+          <div style="font-size:15px;font-weight:600;margin-bottom:6px;">✅ Product imported</div>
+          <div style="font-size:13px;color:var(--text-dim);">${generatedUrls.length} of ${selectedUrls.length} image(s) generated. Find it under Select Media.</div>
+          <button class="btn full" id="importAnotherBtn">Import another product</button>
+        </div>
+      `;
+      document.getElementById('importAnotherBtn').addEventListener('click', resetImportFlow);
+    } else {
+      alert('Failed to finalize product: ' + (finalizeData.error || 'unknown error'));
+      generateBtn.disabled = false;
+      selectAllBtn.disabled = false;
+      updateImportGenerateButton();
+    }
+  } catch (err) {
+    alert('Error finalizing product: ' + err.message);
+    generateBtn.disabled = false;
+    selectAllBtn.disabled = false;
+    updateImportGenerateButton();
+  }
+}
+
+function resetImportFlow() {
+  importState.sessionId = null;
+  importState.product = null;
+  importState.selected = new Set();
+  importUrlInput.value = '';
+  importResult.innerHTML = '';
 }
 
 // ─── Init ────────────────────────────────────────────────

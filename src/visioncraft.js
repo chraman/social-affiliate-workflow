@@ -334,8 +334,8 @@ async function generateInfluencerImage(productImageUrl) {
     // Subscribe BEFORE triggering — avoids race condition where
     // job completes before we subscribe
     console.log('🎨 Triggering AI template + Product generation...');
-    let templateImageUrl = TEMPLATE_ARRAY[4].templateUrl
-    let prompt = TEMPLATE_ARRAY[4].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
+    let templateImageUrl = TEMPLATE_ARRAY[5].templateUrl
+    let prompt = TEMPLATE_ARRAY[5].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
     // Accesseries, jewelry and footware should be based on the prodct category
     const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
     // console.log(`🆔 Job ID: ${jobId}`);

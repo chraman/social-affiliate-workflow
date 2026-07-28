@@ -212,7 +212,7 @@ async function generateAccessoriesDecription(productDescription) {
 
   const { data } = await axios.post(url, body, {
     headers: { "Content-Type": "application/json" },
-    timeout: 60000,
+    timeout: 600000,
   });
 
   const description =
