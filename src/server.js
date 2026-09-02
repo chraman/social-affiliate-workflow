@@ -153,6 +153,47 @@ const COMBINE_IMAGE_HOLD_SECONDS = Number(process.env.COMBINE_IMAGE_HOLD_SECONDS
 
 const { generateAnimatedSticker } = require('./animated-sticker');
 
+// ─── Myntra Logo Overlay Config (see test-logo.js) ───────────────
+// Same technique as test-logo.js: upload the logo once as its own asset
+// with a stable public_id, then apply it as an image overlay layer.
+const MYNTRA_LOGO_LOCAL_PATH = process.env.MYNTRA_LOGO_LOCAL_PATH || './assets/logo/download.png';
+const MYNTRA_LOGO_PUBLIC_ID = process.env.MYNTRA_LOGO_PUBLIC_ID || 'myntra-logo';
+const MYNTRA_LOGO_FOLDER = process.env.MYNTRA_LOGO_FOLDER || 'sticker-tests/assets';
+const MYNTRA_LOGO_WIDTH = Number(process.env.MYNTRA_LOGO_WIDTH || 200);
+const MYNTRA_LOGO_GRAVITY = process.env.MYNTRA_LOGO_GRAVITY || 'west';
+const MYNTRA_LOGO_X = Number(process.env.MYNTRA_LOGO_X ?? 80);
+const MYNTRA_LOGO_Y = Number(process.env.MYNTRA_LOGO_Y ?? -400);
+
+// Uploaded once and cached for the life of the process — avoids re-uploading
+// the same logo asset on every combine job.
+let myntraLogoPublicIdPromise = null;
+async function getMyntraLogoPublicId() {
+  if (!myntraLogoPublicIdPromise) {
+    myntraLogoPublicIdPromise = uploadMyntraLogoIfNeeded().catch(err => {
+      myntraLogoPublicIdPromise = null; // don't cache a failure — allow retry next time
+      throw err;
+    });
+  }
+  return myntraLogoPublicIdPromise;
+}
+
+async function uploadMyntraLogoIfNeeded() {
+  const absoluteLogoPath = path.resolve(MYNTRA_LOGO_LOCAL_PATH);
+  if (!fs.existsSync(absoluteLogoPath)) {
+    throw new Error(`Myntra logo not found at ${absoluteLogoPath}. Save the logo file there first (see test-logo.js).`);
+  }
+
+  const result = await cloudinary.uploader.upload(absoluteLogoPath, {
+    folder: MYNTRA_LOGO_FOLDER,
+    public_id: MYNTRA_LOGO_PUBLIC_ID,
+    overwrite: true,
+    invalidate: true,
+    resource_type: 'image',
+  });
+
+  return result.public_id;
+}
+
 // Add a stickerText param (pass the caption you want jumping on the first image)
 async function runCombineJob(videoRowId, items, stickerText) {
   try {
@@ -183,7 +224,7 @@ async function runCombineJob(videoRowId, items, stickerText) {
             width: COMBINE_WIDTH,
             height: COMBINE_HEIGHT,
             crop: "fill",
-            effect: "zoompan:du_"+COMBINE_IMAGE_HOLD_SECONDS+";maxzoom_1.2",
+            effect: "zoompan:du_"+COMBINE_IMAGE_HOLD_SECONDS+";maxzoom_1.5",
             duration: COMBINE_IMAGE_HOLD_SECONDS,
             fps: COMBINE_FPS
           }
@@ -254,7 +295,7 @@ async function runCombineJob(videoRowId, items, stickerText) {
           overlay: formattedId,
           flags: `splice:${fastTransition}`,
           duration: COMBINE_IMAGE_HOLD_SECONDS, 
-          effect: "zoompan:du_"+COMBINE_IMAGE_HOLD_SECONDS+";maxzoom_1.2",
+          effect: "zoompan:du_"+COMBINE_IMAGE_HOLD_SECONDS+";maxzoom_1.5",
         });
         transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply' });
@@ -273,7 +314,7 @@ async function runCombineJob(videoRowId, items, stickerText) {
         transformation.push({
           overlay: isVideo ? `video:${formattedId}` : formattedId,
           flags: `splice:${fastTransition}`,
-          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan:du_'+COMBINE_IMAGE_HOLD_SECONDS+';maxzoom_1.2' })
+          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan:du_'+COMBINE_IMAGE_HOLD_SECONDS+';maxzoom_1.5' })
         });
         transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply', start_offset: 0 });
@@ -291,12 +332,25 @@ async function runCombineJob(videoRowId, items, stickerText) {
         transformation.push({
           overlay: isVideo ? `video:${formattedId}` : formattedId,
           flags: `splice:${fastTransition}`,
-          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan:du_'+COMBINE_IMAGE_HOLD_SECONDS+';maxzoom_1.2' })
+          ...(isVideo ? {} : { duration: COMBINE_IMAGE_HOLD_SECONDS, effect: 'zoompan:du_'+COMBINE_IMAGE_HOLD_SECONDS+';maxzoom_1.5' })
         });
         transformation.push(canvasLayout);
         transformation.push({ flags: 'layer_apply' });
       }
     }
+
+    // --- Myntra logo badge over the full combined video (see test-logo.js) ---
+    const logoPublicId = await getMyntraLogoPublicId();
+    transformation.push({
+      overlay: logoPublicId.replace(/\//g, ':'),
+      width: MYNTRA_LOGO_WIDTH,
+      crop: 'scale',
+      gravity: MYNTRA_LOGO_GRAVITY,
+      x: MYNTRA_LOGO_X,
+      y: MYNTRA_LOGO_Y,
+      flags: 'layer_apply',
+    });
+    // ------------------------------------------------------------------------
 
     // 2. FORCED INSTAGRAM COMPLIANCE: Lock down video/audio codecs and quality
     transformation.push({

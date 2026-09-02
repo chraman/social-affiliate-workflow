@@ -71,6 +71,28 @@
     border-color: var(--accent);
   }
 
+  .media-filter {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .media-filter-btn {
+    flex: 1;
+    text-align: center;
+    padding: 6px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .media-filter-btn.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
   main { padding: 14px; }
 
   .outfit-card {
@@ -577,6 +599,11 @@
 <header>
   <h1>📋 Post Queue Dashboard</h1>
   <select id="categorySelect"><option value="">Loading categories…</option></select>
+  <div class="media-filter" id="mediaFilterBar">
+    <div class="media-filter-btn active" data-media-filter="all">All</div>
+    <div class="media-filter-btn" data-media-filter="image">Images</div>
+    <div class="media-filter-btn" data-media-filter="video">Videos</div>
+  </div>
   <div class="tabs">
     <div class="tab active" data-view="select">Select Media</div>
     <div class="tab" data-view="videos">Video Queue</div>
@@ -653,7 +680,8 @@
 <script>
 const state = {
   selected: [], // { media_type: 'IMAGE'|'VIDEO', image_id?, video_id?, product_id, image_url, outfit_name }
-  category: ''
+  category: '',
+  mediaFilter: 'all' // 'all' | 'image' | 'video'
 };
 
 const selectView = document.getElementById('selectView');
@@ -702,10 +730,12 @@ document.querySelectorAll('.tab').forEach(tab => {
     videosView.style.display = 'none';
     queueView.style.display = 'none';
     addView.style.display = 'none';
+    mediaFilterBar.style.display = 'none';
     clearInterval(videoPollTimer);
 
     if (tab.dataset.view === 'select') {
       selectView.style.display = '';
+      mediaFilterBar.style.display = '';
     } else if (tab.dataset.view === 'videos') {
       videosView.style.display = '';
       loadVideos();
@@ -735,6 +765,16 @@ async function loadCategories() {
 categorySelect.addEventListener('change', () => {
   state.category = categorySelect.value;
   loadMedia();
+});
+
+const mediaFilterBar = document.getElementById('mediaFilterBar');
+mediaFilterBar.querySelectorAll('.media-filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    mediaFilterBar.querySelectorAll('.media-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.mediaFilter = btn.dataset.mediaFilter;
+    loadMedia();
+  });
 });
 
 async function fetchCombinedMedia(category) {
@@ -802,13 +842,24 @@ async function loadMedia() {
   try {
     const result = await fetchCombinedMedia(state.category);
     const outfits = combineMedia(result.images, result.videos).reverse();
-    
-    if (outfits.length === 0) {
-      selectView.innerHTML = '<div class="empty-state">No media found for this category.</div>';
+
+    const showImages = state.mediaFilter !== 'video';
+    const showVideos = state.mediaFilter !== 'image';
+
+    const filteredOutfits = outfits
+      .map(outfit => ({
+        ...outfit,
+        images: showImages ? (outfit.images || []) : [],
+        generated_videos: showVideos ? (outfit.generated_videos || []) : []
+      }))
+      .filter(outfit => outfit.images.length > 0 || outfit.generated_videos.length > 0);
+
+    if (filteredOutfits.length === 0) {
+      selectView.innerHTML = '<div class="empty-state">No media found for this filter.</div>';
       return;
     }
 
-    selectView.innerHTML = outfits.map(outfit => {
+    selectView.innerHTML = filteredOutfits.map(outfit => {
       const allImages = outfit.images || [];
       const allVideos = outfit.generated_videos || [];
 

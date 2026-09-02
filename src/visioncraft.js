@@ -78,7 +78,7 @@ const TEMPLATE_ARRAY = [
     templateId: 5,
     templateDescription: "home selfie image, white background, white phone insta optimised",
     aspectRation:"9:16",
-    templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmroga7lc0005da6guwqfpycz.png",
+    templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmtbemt2t000bdau47c2a66ww.png",
     templatePrompt: 
     `A stylish woman stands poised in a modern environment, capturing a mirror selfie with her phone partially obscuring her face. She maintains the same pose, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, and overall composition in every generation.
 
@@ -334,8 +334,8 @@ async function generateInfluencerImage(productImageUrl) {
     // Subscribe BEFORE triggering — avoids race condition where
     // job completes before we subscribe
     console.log('🎨 Triggering AI template + Product generation...');
-    let templateImageUrl = TEMPLATE_ARRAY[5].templateUrl
-    let prompt = TEMPLATE_ARRAY[5].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
+    let templateImageUrl = TEMPLATE_ARRAY[4].templateUrl
+    let prompt = TEMPLATE_ARRAY[4].templatePrompt.replaceAll("[INJECT_CLOTHING_DESCRIPTION]", productDescription).replaceAll("[INJECT_ACCESSORIES_DESCRIPTION]", accessoriesDescription)
     // Accesseries, jewelry and footware should be based on the prodct category
     const imageBuffer = await generateImageWithFlux({productImageUrl, templateImageUrl, prompt});
     // console.log(`🆔 Job ID: ${jobId}`);
