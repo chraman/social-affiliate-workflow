@@ -41,6 +41,12 @@ const LTX_MODEL = process.env.LTX_MODEL || 'ltx-2-3-fast';
 const LTX_RESOLUTION = process.env.LTX_RESOLUTION || '1080x1920';
 const LTX_DURATION_SECONDS = Number(process.env.LTX_DURATION_SECONDS || 2);
 
+// ─── ComfyUI Config (self-hosted Wan 2.2 5B I2V workflow) ───────────────
+// Assumes ComfyUI's default port; point this at wherever it's actually
+// running (a LAN box, a tunnel to a GPU rig, etc.) via COMFYUI_BASE_URL.
+const { startImageToVideoUsingComfyUI } = require('./comfyui-client');
+const COMFYUI_BASE_URL = process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188';
+
 // ─── Basic Auth Setup ────────────────────────────────────────────
 const DASH_USER = process.env.DASH_USER || 'admin';
 const DASH_PASS = process.env.DASH_PASS;
@@ -704,24 +710,44 @@ app.delete('/api/images/:imageId', async (req, res) => {
 });
 
 app.post('/api/videos/generate', async (req, res) => {
-  const { image_id, product_id, image_url, prompt } = req.body;
+  const { image_id, product_id, image_url, prompt, provider } = req.body;
   if (!image_id || !image_url || !product_id) {
     return res.status(400).json({ error: 'image_id, product_id and image_url are required' });
   }
-  if (!MAGIC_HOUR_API_KEY) {
+
+  // 'ltx' stays the default so existing front-end calls that don't send a
+  // provider keep behaving exactly like before this change.
+  const chosenProvider = provider || 'comfyui';
+
+  if (chosenProvider === 'ltx' && !LTX_API_KEY) {
+    return res.status(500).json({ error: 'LTX_API_KEY not configured on the server' });
+  }
+  if (chosenProvider === 'magic_hour' && !MAGIC_HOUR_API_KEY) {
     return res.status(500).json({ error: 'MAGIC_HOUR_API_KEY not configured on the server' });
   }
+  if (!['ltx', 'magic_hour', 'comfyui'].includes(chosenProvider)) {
+    return res.status(400).json({ error: `Unknown provider "${chosenProvider}"` });
+  }
+
   try {
-    const projectId = await startImageToVideoUsingLTX(image_url, prompt);
+    let projectId;
+    if (chosenProvider === 'comfyui') {
+      projectId = await startImageToVideoUsingComfyUI(image_url, prompt);
+    } else if (chosenProvider === 'magic_hour') {
+      projectId = await startImageToVideoUsingMH(image_url, prompt);
+    } else {
+      projectId = await startImageToVideoUsingLTX(image_url, prompt);
+    }
+
     const parsedProductId = parseInt(product_id, 10);
     const insertRes = await pool.query(
       `INSERT INTO product_videos (product_id, source_image_id, source_image_url, magic_hour_project_id, status, prompt, product_ids)
        VALUES ($1, $2, $3, $4, 'processing', $5, ARRAY[$1]::integer[]) RETURNING id`,
       [parsedProductId, parseInt(image_id, 10), image_url, projectId, prompt || null]
     );
-    res.json({ ok: true, video_id: insertRes.rows[0].id, magic_hour_project_id: projectId });
+    res.json({ ok: true, video_id: insertRes.rows[0].id, magic_hour_project_id: projectId, provider: 'comfyui' });
   } catch (err) {
-    console.error('Magic Hour start error:', err.response?.data || err.message);
+    console.error(`${chosenProvider} start error:`, err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.message || err.message });
   }
 });

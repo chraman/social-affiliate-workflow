@@ -17,6 +17,8 @@ const MAGIC_HOUR_BASE = 'https://api.magichour.ai/v1';
 const LTX_API_KEY = process.env.LTX_API_KEY;
 const LTX_BASE = 'https://api.ltx.io/v2';
 
+const { checkVideoStatusUsingComfyUI, downloadComfyUIVideo } = require('./comfyui-client');
+
 // How long to keep polling a single job before giving up and marking it failed.
 const MAX_JOB_AGE_MS = 6 * 60 * 60 * 1000; // 30 min
 
@@ -81,6 +83,34 @@ async function handleCompletedJob(job, downloadUrl) {
   console.log(`  ✅ Video #${job.id} ready → ${uploadResult.secure_url}`);
 }
 
+// Same as handleCompletedJob above, but for ComfyUI: since ComfyUI's /view
+// URL usually isn't reachable from Cloudinary's servers (localhost/LAN),
+// we download the bytes ourselves and upload a buffer instead of a URL.
+async function handleCompletedComfyUIJob(job, videoUrl) {
+  const folder = getFolderFromCloudinaryUrl(job.source_image_url);
+  const baseName = getPublicIdFromCloudinaryUrl(job.source_image_url)?.split('/').pop() || `video_${job.id}`;
+
+  const videoBuffer = await downloadComfyUIVideo(videoUrl);
+
+  const uploadResult = await new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream({
+      resource_type: 'video',
+      folder: folder || undefined,
+      public_id: `${baseName}_motion_${job.id}`,
+      overwrite: false
+    }, (err, result) => (err ? reject(err) : resolve(result)));
+    uploadStream.end(videoBuffer);
+  });
+
+  await pool.query(
+    `UPDATE product_videos
+     SET status = 'ready', video_url = $1, cloudinary_public_id = $2, updated_at = NOW()
+     WHERE id = $3`,
+    [uploadResult.secure_url, uploadResult.public_id, job.id]
+  );
+  console.log(`  ✅ Video #${job.id} ready (ComfyUI) → ${uploadResult.secure_url}`);
+}
+
 async function processVideoJobs() {
   const pending = await pool.query(
     `SELECT * FROM product_videos WHERE status = 'processing' ORDER BY created_at ASC`
@@ -112,8 +142,29 @@ async function processVideoJobs() {
     }
 
     if (!job.magic_hour_project_id) continue;
-
+    console.log("here", job.provider)
     try {
+      if (job.provider === undefined) {
+        console.log("here", job.magic_hour_project_id)
+        const data = await checkVideoStatusUsingComfyUI(job.magic_hour_project_id);
+        console.log(data);
+
+        if (data.status === 'completed') {
+          await handleCompletedComfyUIJob(job, data.video_url);
+        } else if (data.status === 'error') {
+          console.error(`  ❌ Video #${job.id} failed: ${data.error}`);
+          await pool.query(
+            `UPDATE product_videos SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2`,
+            [data.error, job.id]
+          );
+        } else {
+          console.log(`  ⏳ Video #${job.id} still processing (ComfyUI)...`);
+        }
+        continue;
+      }
+
+      // magic_hour / ltx path — both currently poll through the LTX-shaped
+      // endpoint, matching the original behavior of this file.
       const data = await checkVideoStatusUsingLTX(job.magic_hour_project_id);
       console.log(data)
       const status = (data.status || '').toLowerCase();
