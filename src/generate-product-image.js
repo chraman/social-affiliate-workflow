@@ -38,7 +38,7 @@ const CONFIG = {
   geminiEndpoint: (model) =>
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
 
-  ngrokFluxUrl: process.env.NGROK_FLUX_URL,
+  ngrokFluxUrl: process.env.NGROK_FLUX__HAYLEY_URL,
   strength: process.env.FLUX_STRENGTH ? Number(process.env.FLUX_STRENGTH) : 0.75,
 
   outputDir: path.join(__dirname, "output"),
@@ -140,6 +140,43 @@ Return exactly ONE continuous paragraph total chars not more that 300. optimized
 Here is the clothing product description:
 
 `.trim();
+
+const GEMINI_SYSTEM_PROMPT_FOR_RESTRUCTURED_PROMPT = `
+Act as an expert prompt engineer for FLUX.1 image-to-image (dual-image reference) and multi-LoRA diffusion pipelines.
+
+Analyze the clothing, accessories, and footwear details in the input prompt and dynamically construct an attention-optimized key-value prompt.
+
+STRICT OUTPUT RULES:
+1. Output ONLY the raw generation prompt.
+2. Zero conversational filler, zero greetings, zero intro ("Here is the prompt:"), zero markdown headings (###), and zero implementation advice at the end.
+3. Output MUST start immediately with the Subject Binding line.
+4. Dynamically generate key names based ONLY on what garments are present in the input. Do NOT hardcode specific garment names (like Kurta, Dupatta, or Dress) if they are not in the input.
+
+REWRITING LOGIC:
+1. Strip all procedural instructions, negative constraints, and meta-commands ("Modify ONLY", "must match exactly", "preserving garment count").
+2. Exclude all background, environment, studio, furniture, camera angle, and lighting descriptions to protect Image 1 background latents.
+3. Resolve compositional bugs (strip out "mirror selfie", "phone", or posture contradictions).
+4. Extract visual details into concise, high-density key-value tags.
+
+OUTPUT TEMPLATE (Generate keys dynamically based on the input outfit):
+
+hayleymodel transferred directly into Image 1, locked to Image 1 pose, face, hairstyle, lighting, and background. Wearing outfit details from Image 2.
+
+Garment Type: [Overall outfit style, ensemble type, or classification]
+Fabric & Texture: [Material, weave, finish, weight, drape]
+Color Palette & Pattern: [Base colors, prints, graphics, embroidery, motifs]
+Top / Upper Garment: [Neckline, bodice, chest detail, sleeves, closure, upper fit]
+Bottom / Lower Garment: [Length, cut, waistline, fit, hemline, silhouette]
+Layering / Outerwear: [Jackets, coats, capes, drapes, wraps, or scarfs—OMIT IF NONE]
+Trims & Detailing: [Borders, seams, stitching, buttons, zippers, pockets, pleats]
+Jewelry & Accessories: [Earrings, necklaces, wristwear, rings, bags, belts]
+Footwear: [Shoes, heels, boots, sandals, embellishments]
+
+Rendering: Photorealistic macro fabric texture, exact 1:1 pattern and construction alignment, seamless geometry integration with Image 1.
+
+Input Prompt to Clean:
+`.trim();
+
 // ---------------------------------------------------------------------------
 // Step 1: Analyze the product image with Gemini 2.5 Flash
 // ---------------------------------------------------------------------------
@@ -246,7 +283,7 @@ async function generateAccessoriesDecription(productDescription) {
 async function generateImageWithFlux({
   productImageUrl,
   templateImageUrl,
-  prompt,
+  restructuredPrompt,
   strength = CONFIG.strength,
 }) {
   if (!CONFIG.ngrokFluxUrl) {
@@ -272,11 +309,11 @@ async function generateImageWithFlux({
   });
   // image3 / image4 intentionally left blank — add more reference images here
   // later if the pipeline needs them (e.g. a second angle of the product).
-  form.append("prompt", prompt);
+  form.append("prompt", restructuredPrompt);
   form.append("strength", String(strength));
 
   console.log("→ Sending request to Flux server:", CONFIG.ngrokFluxUrl);
-  console.log("→ Prompt:\n", prompt, "\n");
+  console.log("→ Prompt:\n", restructuredPrompt, "\n");
 
   const response = await axios.post(CONFIG.ngrokFluxUrl, form, {
     headers: {
@@ -345,9 +382,48 @@ async function downloadImageAsBuffer(url) {
   return Buffer.from(response.data);
 }
 
+async function generateRestructuredPrompt(inputPrompt) {
+  if (!CONFIG.geminiApiKey) {
+    throw new Error("Missing GEMINI_API_KEY in environment.");
+  }
+  let prompt = GEMINI_SYSTEM_PROMPT_FOR_RESTRUCTURED_PROMPT + inputPrompt
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.4
+    },
+  };
+
+  const url = `${CONFIG.geminiEndpoint(CONFIG.geminiModel)}?key=${CONFIG.geminiApiKey}`;
+
+  const { data } = await axios.post(url, body, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 600000,
+  });
+
+  const description =
+    data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("").trim();
+
+  if (!description) {
+    throw new Error(
+      "Gemini returned no restructured prompt. Full response: " + JSON.stringify(data)
+    );
+  }
+
+  return description;
+}
+
 module.exports = {
   analyzeProductWithGemini,
   generateImageWithFlux,
   downloadImageAsBuffer,
-  generateAccessoriesDecription
+  generateAccessoriesDecription,
+  generateRestructuredPrompt
 };

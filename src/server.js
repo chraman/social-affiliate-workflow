@@ -16,6 +16,7 @@ const { buildAffiliateLinkCuelinks } = require('./affiliate');
 const { formatWhatsAppMessage } = require('./formatter');
 const { generateInfluencerImage } = require('./visioncraft');
 const { createProduct, uploadImagesForProduct } = require('./pipeline');
+const { getTrendingProducts } = require('./myntra-trending');
 
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -401,6 +402,17 @@ function scheduleImportSessionCleanup(sessionId) {
   setTimeout(() => pendingImports.delete(sessionId), IMPORT_SESSION_TTL_MS).unref?.();
 }
 
+// ─── Fetch Products tab: trending-list cache ─────────────────────
+// Keeps repeated fetches (user re-opening the tab, re-clicking) from
+// hitting Myntra every time — reduces odds of getting rate-limited.
+const trendingCache = new Map(); // "category::sort::limit" -> { products, expiresAt }
+const TRENDING_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const ALLOWED_TRENDING_SORTS = new Set(['popularity', 'discount', 'priceAsc', 'priceDesc', 'newest']);
+
+function getTrendingCacheKey(category, sort, limit) {
+  return `${category}::${sort}::${limit}`;
+}
+
 // ─── API Routes ──────────────────────────────────────────────────
 
 app.get('/api/categories', async (req, res) => {
@@ -417,6 +429,48 @@ app.get('/api/categories', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Fetch Products tab: browse Myntra "trending" products by category
+// (feeds the "Import This" button, which then calls /api/products/scrape
+// below — this route itself only reads/lists, it never writes to the DB) ──
+
+app.get('/api/products/trending', async (req, res) => {
+  const category = (req.query.category || '').trim();
+  const sort = (req.query.sort || 'popularity').trim();
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+
+  if (!category) {
+    return res.status(400).json({ error: 'Missing required "category" query param.' });
+  }
+  if (!ALLOWED_TRENDING_SORTS.has(sort)) {
+    return res.status(400).json({
+      error: `Invalid sort "${sort}". Must be one of: ${[...ALLOWED_TRENDING_SORTS].join(', ')}`
+    });
+  }
+  if (!/^[a-z0-9-]+$/i.test(category)) {
+    return res.status(400).json({ error: 'Category must look like a Myntra URL slug, e.g. "men-tshirts".' });
+  }
+
+  const cacheKey = getTrendingCacheKey(category, sort, limit);
+  const cached = trendingCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json(cached.products);
+  }
+
+  try {
+    const products = await getTrendingProducts(category, { limit, sort });
+    trendingCache.set(cacheKey, { products, expiresAt: Date.now() + TRENDING_CACHE_TTL_MS });
+    res.json(products);
+  } catch (err) {
+    console.error(`[trending] Failed for category="${category}" sort="${sort}":`, err.message);
+    const isScrapeIssue = /window\.__myx|bot-check/i.test(err.message);
+    res.status(isScrapeIssue ? 502 : 500).json({
+      error: isScrapeIssue
+        ? 'Myntra did not return the expected product data (may be rate-limiting or blocking this request). Try again shortly.'
+        : 'Failed to fetch trending products: ' + err.message
+    });
   }
 });
 
