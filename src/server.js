@@ -44,7 +44,7 @@ const LTX_DURATION_SECONDS = Number(process.env.LTX_DURATION_SECONDS || 2);
 // ─── ComfyUI Config (self-hosted Wan 2.2 5B I2V workflow) ───────────────
 // Assumes ComfyUI's default port; point this at wherever it's actually
 // running (a LAN box, a tunnel to a GPU rig, etc.) via COMFYUI_BASE_URL.
-const { startImageToVideoUsingComfyUI } = require('./comfyui-client');
+const { startImageToVideoUsingComfyUI } = require('./comfyui-wan-animate-client');
 const COMFYUI_BASE_URL = process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188';
 
 // ─── Basic Auth Setup ────────────────────────────────────────────
@@ -747,6 +747,7 @@ app.post('/api/videos/generate', async (req, res) => {
     );
     res.json({ ok: true, video_id: insertRes.rows[0].id, magic_hour_project_id: projectId, provider: 'comfyui' });
   } catch (err) {
+    console.log(JSON.stringify(err.response?.data, null, 2));
     console.error(`${chosenProvider} start error:`, err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.message || err.message });
   }

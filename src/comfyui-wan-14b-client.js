@@ -1,7 +1,8 @@
 // comfyui-client.js
 // Shared helper for talking to a self-hosted ComfyUI instance running the
-// Wan 2.2 5B image-to-video workflow (see wan22-i2v-workflow.json, exported
-// straight from the ComfyUI "Save (API Format)" button).
+// Wan 2.2 I2V A14B (4-step lightning LoRA + CLIP Vision) image-to-video
+// workflow (see wan22-i2v-workflow.json, exported straight from the
+// ComfyUI "Save (API Format)" button).
 //
 // Used by server.js (to kick a job off) and videoWorker.js (to poll it,
 // same pattern as the Magic Hour / LTX jobs).
@@ -11,7 +12,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const FormData = require('form-data');
-const workflowTemplate = require('./wan22-i2v-workflow.json');
+const workflowTemplate = require('./wan22-i2v-workflow-14b.json');
 
 const COMFYUI_BASE = process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188';
 
@@ -25,11 +26,19 @@ const NGROK_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 // Node ids inside wan22-i2v-workflow.json. If you re-export the workflow
 // from ComfyUI after editing the graph, these ids can shift — double check
 // them against the new JSON before trusting this in production.
+//
+// This workflow is the two-stage A14B (High Noise + Low Noise) lightning
+// setup, so there isn't a single "the KSampler" node anymore — there are
+// two KSamplerAdvanced nodes chained together (high-noise pass, then
+// low-noise pass), and the final output comes from a VHS_VideoCombine
+// node rather than a SaveVideo node.
 const NODE_IDS = {
-  positivePrompt: '6',   // CLIPTextEncode (Positive Prompt)
-  seed: '3',             // KSampler
-  loadImage: '56',       // LoadImage
-  saveVideo: '58'        // SaveVideo
+  positivePrompt: '6',    // CLIPTextEncode (Positive Prompt)
+  negativePrompt: '7',    // CLIPTextEncode (Negative Prompt)
+  loadImage: '81',        // LoadImage
+  samplerHighNoise: '57', // KSamplerAdvanced - first pass (High Noise model)
+  samplerLowNoise: '58',  // KSamplerAdvanced - second pass (Low Noise model)
+  videoCombine: '70'      // VHS_VideoCombine (final output node)
 };
 
 // ─── Upload the source image into ComfyUI's /input folder ────────────────
@@ -57,23 +66,22 @@ async function startImageToVideoUsingComfyUI(imageUrl, userPrompt) {
 
   const workflow = JSON.parse(JSON.stringify(workflowTemplate)); // deep clone
 
-  // preffered 3 sec fashoin shot
-//   userPrompt = "Photorealistic I2V. She gently raises one hand and rests it naturally near her waist. The camera smoothly pulls back slightly while remaining directly in front of her, keeping her entire outfit clearly visible from top to bottom. The camera maintains focus on the outfit throughout the movement. She remains naturally posed while the camera creates a clean fashion-style reveal. Smooth continuous motion, realistic human movement, cinematic fashion video."
- // perfect zoom to the face
-//   userPrompt  = "Photorealistic I2V. The woman maintains direct eye contact with the camera throughout the shot. As the camera moves smoothly from left to right and gradually moves closer, her eyes continuously track the camera, following its movement naturally. Her gaze stays locked onto the camera at all times. Her head makes a very subtle natural adjustment to follow the camera while her body remains mostly still. Smooth continuous camera movement, realistic eye and head tracking, cinematic fashion video."
-  // hair setting movement
-  userPrompt = "Photorealistic I2V. The subject remains facing forward at all times, maintaining continuous direct eye contact with the camera. Absolute facial consistency, zero head movement, zero body rotation. She slowly and gracefully raises one hand to gently touch her hair near her ear, then softly lowers it back down. Subtle, natural fabric physics on her sleeveless patterned outfit. Fixed camera angle, stable background, cinematic lighting."
+  // Default prompt used when the caller doesn't pass one — coffee-sip
+  // fashion-shot motion, matching what's baked into the exported JSON.
 
-// coffee sip prompt
-// userPrompt = "Photorealistic I2V. The subject remains facing forward at all times, maintaining continuous direct eye contact with the camera except for a brief natural downward glance as she drinks. Absolute facial consistency, zero head rotation, zero body rotation. She slowly and gracefully raises the coffee mug already in her hand toward her mouth, tilts it slightly to take a small sip, then smoothly lowers it back down to her original holding position. Natural subtle throat/jaw movement while sipping, mouth stays mostly closed against the rim. Subtle, natural fabric physics on her outfit. Fixed camera angle, stable background, cinematic lighting."
-  // userPrompt = "Photorealistic I2V. She slowly unclasps her hands from in front of her waist, letting both arms relax naturally to her sides. The camera pulls back smoothly from a medium frame to a full-body shot within the shot, revealing the entire outfit from neckline to feet. Clear, visible camera distance change, realistic hand and arm motion, cinematic fashion video." 
-if (userPrompt) {
-    workflow[NODE_IDS.positivePrompt].inputs.text = userPrompt;
-  }
+  const DEFAULT_PROMPT = userPrompt || "The woman stands centered in frame and performs one continuous, slow 360-degree turn to showcase the full outfit from every angle. The rotation is smooth and even-paced, completing in a single unbroken motion. Fabric shifts naturally with the turn — realistic drape, subtle sheen, gentle movement around the hem. Hair sways softly with the rotation. Camera remains static, medium-full shot, no zoom or pan. Lighting stays soft and consistent throughout. Motion is fluid and physically natural, no jerky or robotic movement."
+
+  workflow[NODE_IDS.positivePrompt].inputs.text =  DEFAULT_PROMPT;
   workflow[NODE_IDS.loadImage].inputs.image = uploadedFilename;
+
   // Randomize the seed each run — otherwise identical inputs can hit
-  // ComfyUI's node cache and just replay a previous result.
-  workflow[NODE_IDS.seed].inputs.seed = crypto.randomInt(0, 281474976710655);
+  // ComfyUI's node cache and just replay a previous result. This workflow
+  // has two KSamplerAdvanced stages (high-noise, then low-noise); use the
+  // same fresh seed for both so the two passes stay coupled to a single
+  // random draw rather than drifting independently.
+  const seed = crypto.randomInt(0, 281474976710655);
+  workflow[NODE_IDS.samplerHighNoise].inputs.noise_seed = seed;
+  workflow[NODE_IDS.samplerLowNoise].inputs.noise_seed = seed;
 
   const clientId = crypto.randomUUID();
   const res = await axios.post(`${COMFYUI_BASE}/prompt`, {
@@ -124,7 +132,7 @@ async function checkVideoStatusUsingComfyUI(promptId) {
     return { status: 'error', error: errMsg };
   }
 
-  const file = extractOutputFile(entry, NODE_IDS.saveVideo);
+  const file = extractOutputFile(entry, NODE_IDS.videoCombine);
   if (!file) {
     // History entry exists but no recognizable video output yet — treat as
     // still processing rather than silently failing.
@@ -141,12 +149,13 @@ async function checkVideoStatusUsingComfyUI(promptId) {
   return { status: 'completed', video_url: videoUrl };
 }
 
-// The SaveVideo node's output key name isn't 100% consistent across
-// ComfyUI versions (seen as "images", "gifs", "videos" depending on
-// version/node set) — so scan whichever key holds an array of
-// {filename, subfolder, type} objects instead of hardcoding one.
-function extractOutputFile(historyEntry, saveNodeId) {
-  const nodeOutput = historyEntry?.outputs?.[saveNodeId];
+// The video-output node's output key name isn't 100% consistent across
+// ComfyUI versions/node sets — VHS_VideoCombine has been seen keyed as
+// "gifs", "videos", or "images" depending on version — so scan whichever
+// key holds an array of {filename, subfolder, type} objects instead of
+// hardcoding one.
+function extractOutputFile(historyEntry, videoNodeId) {
+  const nodeOutput = historyEntry?.outputs?.[videoNodeId];
   if (!nodeOutput) return null;
   for (const key of Object.keys(nodeOutput)) {
     const val = nodeOutput[key];

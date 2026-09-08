@@ -17,10 +17,11 @@ const MAGIC_HOUR_BASE = 'https://api.magichour.ai/v1';
 const LTX_API_KEY = process.env.LTX_API_KEY;
 const LTX_BASE = 'https://api.ltx.io/v2';
 
-const { checkVideoStatusUsingComfyUI, downloadComfyUIVideo } = require('./comfyui-client');
+const { checkVideoStatusUsingComfyUI, downloadComfyUIVideo } = require('./comfyui-wan-animate-client');
 
 // How long to keep polling a single job before giving up and marking it failed.
 const MAX_JOB_AGE_MS = 6 * 60 * 60 * 1000; // 30 min
+
 
 // ─── Cloudinary URL helpers (duplicated from server.js — see note there) ──
 function getPublicIdFromCloudinaryUrl(url) {
@@ -195,7 +196,7 @@ async function processVideoJobs() {
 }
 
 // Poll every minute — matches the cadence of ig-worker.js
-const INTERVAL_MS = 60 * 1000;
+const INTERVAL_MS = 30 * 1000;
 console.log('🎬 Magic Hour video worker started. Checking every 1 min.');
 processVideoJobs();
 setInterval(processVideoJobs, INTERVAL_MS);

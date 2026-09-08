@@ -133,7 +133,7 @@ Return exactly ONE continuous paragraph between 150 and 300 words, total chars n
 const GEMINI_SYSTEM_PROMPT_FOR_ACCESSORIES = `
 You are an expert fashion stylist and AI prompt engineer specializing in FLUX text-to-image prompting. 
 
-I am going to provide you with a product description of a clothing item. Your task is to analyze the clothing's style, fabric, and color, and then generate ONE single, cohesive FLUX image prompt that displays the outfit styled completely with complementary accessories, jewelry, and footwear.
+I am going to provide you with a product description of a clothing item. Your task is to analyze the clothing's style, fabric, and color, and then generate ONE single, cohesive FLUX image prompt that displays the outfit styled completely with complementary accessories(excluding bag, belt), jewelry, and footwear.
 
 Return exactly ONE continuous paragraph total chars not more that 300. optimized for direct use inside an AI image generation prompt.
 

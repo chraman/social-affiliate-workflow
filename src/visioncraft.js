@@ -138,6 +138,27 @@ const TEMPLATE_ARRAY = [
 
     The model must be actively styled with these items. Ensure the footwear matches the pose naturally, the jewelry (rings/bracelets) is visible on the hands holding or near the phone, and any bags or accessories are integrated realistically into the mirror selfie scene (e.g., slung over her shoulder, resting on nearby furniture, or held naturally).`
   
+  },
+  {
+    templateId: 8,
+    templateDescription: "hayley model image, modern home office",
+    aspectRation:"9:16",
+    templateUrl: "http://localhost:9000/dev-ai-images-generated/generated/cmorf337c000adamw2w6f691b/cmto09doy000tdaxwbltpj5fe.png",
+    templatePrompt: 
+    `hayleymodel stands centered in a modern minimalist home office, capturing a full-body fashion editorial photo, her dark, wavy hair cascading naturally. She maintains the same pose of holding coffe mug, hairstyle, body proportions, camera angle, framing, lighting, background, furniture placement, and overall composition in every generation.
+     Modify ONLY her outfit, accessories, jewelry, and footwear based on the specifications below. The entire ensemble must fit naturally onto the model while strictly preserving the original pose and composition.
+    ---
+    ### 👗 CLOTHING SPECIFICATION:
+    [INJECT_CLOTHING_DESCRIPTION]
+
+    The outfit must exactly match this product specification, preserving the exact garment count, silhouette, proportions, fabric appearance, colors, prints, embroidery, trims, buttons, seams, closures, pockets, pleats, gathers, ruching, drape, hems, necklines, sleeves, borders, decorative details, and overall construction.
+
+    ---
+    ### 👜 ACCESSORIES, JEWELRY, & FOOTWEAR SPECIFICATION:
+    [INJECT_ACCESSORIES_DESCRIPTION]
+
+    The model must be actively styled with these items. Ensure the footwear matches the pose naturally, the jewelry (rings/bracelets) is visible on the hands, and any accessories are integrated realistically into the scene (e.g. resting on nearby furniture).`
+    
   }
 ]
 

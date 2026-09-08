@@ -1,17 +1,26 @@
-// comfyui-client.js
+// comfyui-fun-control-client.js
 // Shared helper for talking to a self-hosted ComfyUI instance running the
-// Wan 2.2 5B image-to-video workflow (see wan22-i2v-workflow.json, exported
-// straight from the ComfyUI "Save (API Format)" button).
+// Wan 2.2 5B "Fun Control" workflow (see wan22-5b-fun-control-workflow.json,
+// exported straight from the ComfyUI "Save (API Format)" button).
 //
-// Used by server.js (to kick a job off) and videoWorker.js (to poll it,
-// same pattern as the Magic Hour / LTX jobs).
+// Unlike the plain image-to-video workflow (comfyui-client.js), this one
+// takes TWO inputs:
+//   - a reference image (what the subject/scene looks like)
+//   - a control video (the motion to drive the generation)
+// and produces a new video that renders the reference image following the
+// control video's motion.
+//
+// Used the same way as comfyui-client.js: call start...() to queue a job,
+// then poll checkVideoStatusUsingComfyUI() the same way as the other
+// video backends (Magic Hour / LTX / plain Wan i2v).
 //
 // Requires the `form-data` package: npm install form-data
 
 const axios = require('axios');
 const crypto = require('crypto');
+const path = require('path');
 const FormData = require('form-data');
-const workflowTemplate = require('./wan22-i2v-workflow.json');
+const workflowTemplate = require('./wan-i2v-animate-workflow.json');
 
 const COMFYUI_BASE = process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188';
 
@@ -22,26 +31,34 @@ const COMFYUI_BASE = process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188';
 // all silently return HTML instead of JSON.
 const NGROK_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 
-// Node ids inside wan22-i2v-workflow.json. If you re-export the workflow
-// from ComfyUI after editing the graph, these ids can shift — double check
-// them against the new JSON before trusting this in production.
+// Node ids inside wan22-5b-fun-control-workflow.json. If you re-export the
+// workflow from ComfyUI after editing the graph, these ids can shift —
+// double check them against the new JSON before trusting this in production.
 const NODE_IDS = {
-  positivePrompt: '6',   // CLIPTextEncode (Positive Prompt)
-  seed: '3',             // KSampler
-  loadImage: '56',       // LoadImage
-  saveVideo: '58'        // SaveVideo
+  positivePrompt: '6',    // CLIPTextEncode (Positive Prompt)
+  negativePrompt: '7',    // CLIPTextEncode (Negative Prompt)
+  ksampler: '3',           // KSampler (seed lives here)
+  loadImage: '70',         // LoadImage (ref_image into Wan22FunControlToVideo)
+  loadVideo: '66',         // LoadVideo (control_video source)
+  funControlToVideo: '60', // Wan22FunControlToVideo (width/height/length live here)
+  videoCombine: '80'       // VHS_VideoCombine (final output node)
 };
 
-// ─── Upload the source image into ComfyUI's /input folder ────────────────
-// The workflow JSON references images by filename, not URL, so we download
-// the Cloudinary image ourselves and re-upload it into ComfyUI before
-// queuing the prompt.
-async function uploadImageToComfyUI(imageUrl) {
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+// ─── Upload a local/remote file into ComfyUI's /input folder ─────────────
+// ComfyUI's /upload/image endpoint isn't actually image-only — it just
+// stores whatever bytes you send under /input and hands back the filename
+// it used. The VHS LoadVideo node (and LoadImage) both just reference a
+// filename in /input, so this same endpoint is reused for the control
+// video too.
+async function uploadFileToComfyUI(fileUrl, { prefix, defaultExt }) {
+  const fileRes = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+
+  const urlExt = path.extname(new URL(fileUrl).pathname);
+  const ext = urlExt || defaultExt;
+  const filename = `${prefix}_${Date.now()}${ext}`;
 
   const form = new FormData();
-  const filename = `src_${Date.now()}.png`;
-  form.append('image', Buffer.from(imgRes.data), { filename });
+  form.append('image', Buffer.from(fileRes.data), { filename });
   form.append('type', 'input');
   form.append('overwrite', 'true');
 
@@ -52,28 +69,27 @@ async function uploadImageToComfyUI(imageUrl) {
 }
 
 // ─── Build the prompt payload and queue it ────────────────────────────────
+// imageUrl        - reference image (subject/outfit/scene to render)
+// controlVideoUrl - the motion-reference video to drive the animation
+// userPrompt      - optional override for the positive text prompt
 async function startImageToVideoUsingComfyUI(imageUrl, userPrompt) {
-  const uploadedFilename = await uploadImageToComfyUI(imageUrl);
+ let controlVideoUrl = "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788851339/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_153.mp4"
+  const [uploadedImage, uploadedVideo] = await Promise.all([
+    uploadFileToComfyUI(imageUrl, { prefix: 'ref', defaultExt: '.png' }),
+    uploadFileToComfyUI(controlVideoUrl, { prefix: 'control', defaultExt: '.mp4' })
+  ]);
 
   const workflow = JSON.parse(JSON.stringify(workflowTemplate)); // deep clone
-
-  // preffered 3 sec fashoin shot
-//   userPrompt = "Photorealistic I2V. She gently raises one hand and rests it naturally near her waist. The camera smoothly pulls back slightly while remaining directly in front of her, keeping her entire outfit clearly visible from top to bottom. The camera maintains focus on the outfit throughout the movement. She remains naturally posed while the camera creates a clean fashion-style reveal. Smooth continuous motion, realistic human movement, cinematic fashion video."
- // perfect zoom to the face
-//   userPrompt  = "Photorealistic I2V. The woman maintains direct eye contact with the camera throughout the shot. As the camera moves smoothly from left to right and gradually moves closer, her eyes continuously track the camera, following its movement naturally. Her gaze stays locked onto the camera at all times. Her head makes a very subtle natural adjustment to follow the camera while her body remains mostly still. Smooth continuous camera movement, realistic eye and head tracking, cinematic fashion video."
-  // hair setting movement
-  userPrompt = "Photorealistic I2V. The subject remains facing forward at all times, maintaining continuous direct eye contact with the camera. Absolute facial consistency, zero head movement, zero body rotation. She slowly and gracefully raises one hand to gently touch her hair near her ear, then softly lowers it back down. Subtle, natural fabric physics on her sleeveless patterned outfit. Fixed camera angle, stable background, cinematic lighting."
-
-// coffee sip prompt
-// userPrompt = "Photorealistic I2V. The subject remains facing forward at all times, maintaining continuous direct eye contact with the camera except for a brief natural downward glance as she drinks. Absolute facial consistency, zero head rotation, zero body rotation. She slowly and gracefully raises the coffee mug already in her hand toward her mouth, tilts it slightly to take a small sip, then smoothly lowers it back down to her original holding position. Natural subtle throat/jaw movement while sipping, mouth stays mostly closed against the rim. Subtle, natural fabric physics on her outfit. Fixed camera angle, stable background, cinematic lighting."
-  // userPrompt = "Photorealistic I2V. She slowly unclasps her hands from in front of her waist, letting both arms relax naturally to her sides. The camera pulls back smoothly from a medium frame to a full-body shot within the shot, revealing the entire outfit from neckline to feet. Clear, visible camera distance change, realistic hand and arm motion, cinematic fashion video." 
-if (userPrompt) {
+userPrompt = " "
+  if (userPrompt) {
     workflow[NODE_IDS.positivePrompt].inputs.text = userPrompt;
   }
-  workflow[NODE_IDS.loadImage].inputs.image = uploadedFilename;
+  workflow[NODE_IDS.loadImage].inputs.image = uploadedImage;
+  workflow[NODE_IDS.loadVideo].inputs.file = uploadedVideo;
+
   // Randomize the seed each run — otherwise identical inputs can hit
   // ComfyUI's node cache and just replay a previous result.
-  workflow[NODE_IDS.seed].inputs.seed = crypto.randomInt(0, 281474976710655);
+  workflow[NODE_IDS.ksampler].inputs.seed = crypto.randomInt(0, 281474976710655);
 
   const clientId = crypto.randomUUID();
   const res = await axios.post(`${COMFYUI_BASE}/prompt`, {
@@ -91,7 +107,7 @@ if (userPrompt) {
 }
 
 // ─── Poll job status ───────────────────────────────────────────────────────
-// NOTE: same caveat as the Magic Hour status check in videoWorker.js —
+// NOTE: same caveat as the other ComfyUI/Magic Hour status checks —
 // /history/{id} is the standard ComfyUI endpoint, but the exact shape of a
 // queued/running/errored entry can vary a bit across ComfyUI versions.
 // Confirm with one manual call (curl {base}/history/{prompt_id}) before
@@ -124,7 +140,7 @@ async function checkVideoStatusUsingComfyUI(promptId) {
     return { status: 'error', error: errMsg };
   }
 
-  const file = extractOutputFile(entry, NODE_IDS.saveVideo);
+  const file = extractOutputFile(entry, NODE_IDS.videoCombine);
   if (!file) {
     // History entry exists but no recognizable video output yet — treat as
     // still processing rather than silently failing.
@@ -141,10 +157,10 @@ async function checkVideoStatusUsingComfyUI(promptId) {
   return { status: 'completed', video_url: videoUrl };
 }
 
-// The SaveVideo node's output key name isn't 100% consistent across
-// ComfyUI versions (seen as "images", "gifs", "videos" depending on
-// version/node set) — so scan whichever key holds an array of
-// {filename, subfolder, type} objects instead of hardcoding one.
+// VHS_VideoCombine's output key isn't a fixed name across ComfyUI/VHS
+// versions (seen as "gifs", "videos", "images" depending on version) — so
+// scan whichever key holds an array of {filename, subfolder, type} objects
+// instead of hardcoding one.
 function extractOutputFile(historyEntry, saveNodeId) {
   const nodeOutput = historyEntry?.outputs?.[saveNodeId];
   if (!nodeOutput) return null;
@@ -156,10 +172,10 @@ function extractOutputFile(historyEntry, saveNodeId) {
 }
 
 // ─── Download the finished video's bytes ──────────────────────────────────
-// Unlike Magic Hour/LTX (hosted services, so Cloudinary can fetch the
-// remote URL directly), ComfyUI usually runs on localhost or a private LAN
-// box that Cloudinary's servers can't reach — so we pull the bytes
-// ourselves here and let the caller upload the buffer instead.
+// Unlike hosted services (Cloudinary can fetch a remote URL directly),
+// ComfyUI usually runs on localhost or a private LAN/Colab box that
+// Cloudinary's servers can't reach — so we pull the bytes ourselves here
+// and let the caller upload the buffer instead.
 async function downloadComfyUIVideo(videoUrl) {
   try {
     const res = await axios.get(videoUrl, { responseType: 'arraybuffer', headers: NGROK_HEADERS });
