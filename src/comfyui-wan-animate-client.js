@@ -73,14 +73,24 @@ async function uploadFileToComfyUI(fileUrl, { prefix, defaultExt }) {
 // controlVideoUrl - the motion-reference video to drive the animation
 // userPrompt      - optional override for the positive text prompt
 async function startImageToVideoUsingComfyUI(imageUrl, userPrompt) {
- let controlVideoUrl = "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788851339/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_153.mp4"
+
+ let controlVideoUrl = "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788850364/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_151.mp4"
+
+ // ek step aage ake mudhna
+//  "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788850364/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_151.mp4"
+ // dono side tilt krna
+ //"https://res.cloudinary.com/ds8bfxetq/video/upload/v1788851829/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_154.mp4"
+ // side mein hath rakhna 
+ // "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788850840/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_152.mp4"
+  // side mein shoulder ki taraf mudhna
+  // "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788851339/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_153.mp4"
   const [uploadedImage, uploadedVideo] = await Promise.all([
     uploadFileToComfyUI(imageUrl, { prefix: 'ref', defaultExt: '.png' }),
     uploadFileToComfyUI(controlVideoUrl, { prefix: 'control', defaultExt: '.mp4' })
   ]);
 
   const workflow = JSON.parse(JSON.stringify(workflowTemplate)); // deep clone
-userPrompt = " "
+userPrompt = "RAW video frame, high detail, photorealistic, cinematic natural lighting, soft subsurface scattering on skin/fur, natural textures, shot on 35mm lens, 24fps film grain, subtle ambient shadows."
   if (userPrompt) {
     workflow[NODE_IDS.positivePrompt].inputs.text = userPrompt;
   }
