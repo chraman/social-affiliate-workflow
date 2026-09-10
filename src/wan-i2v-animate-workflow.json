@@ -61,7 +61,7 @@
   },
   "20": {
     "inputs": {
-      "text": "45",
+      "text": "113",
       "anything": [
         "13",
         1
@@ -91,7 +91,7 @@
   },
   "28": {
     "inputs": {
-      "value": 4
+      "value": 7
     },
     "class_type": "FloatConstant",
     "_meta": {
@@ -118,7 +118,7 @@
   },
   "32": {
     "inputs": {
-      "value": 720
+      "value": 480
     },
     "class_type": "INTConstant",
     "_meta": {
@@ -293,12 +293,12 @@
   },
   "78": {
     "inputs": {
-      "blocks_to_swap": 28,
-      "offload_img_emb": true,
-      "offload_txt_emb": true,
+      "blocks_to_swap": 0,
+      "offload_img_emb": false,
+      "offload_txt_emb": false,
       "use_non_blocking": false,
       "vace_blocks_to_swap": 0,
-      "prefetch_blocks": 1,
+      "prefetch_blocks": 0,
       "block_swap_debug": false
     },
     "class_type": "WanVideoBlockSwap",
@@ -319,7 +319,7 @@
     "inputs": {
       "model_name": "Wan2_1_VAE_bf16.safetensors",
       "precision": "fp16",
-      "use_cpu_cache": true,
+      "use_cpu_cache": false,
       "verbose": false
     },
     "class_type": "WanVideoVAELoader",
@@ -381,7 +381,7 @@
         "13",
         1
       ],
-      "force_offload": true,
+      "force_offload": false,
       "frame_window_size": [
         "144",
         0
@@ -389,7 +389,7 @@
       "colormatch": "disabled",
       "pose_strength": 1,
       "face_strength": 1,
-      "tiled_vae": true,
+      "tiled_vae": false,
       "vae": [
         "81",
         0
@@ -418,7 +418,7 @@
       "cfg": 1,
       "shift": 8,
       "seed": 777,
-      "force_offload": true,
+      "force_offload": false,
       "scheduler": "lcm",
       "riflex_freq_index": 0,
       "denoise_strength": 1,
@@ -494,6 +494,10 @@
       "images": [
         "92",
         0
+      ],
+      "audio": [
+        "13",
+        2
       ]
     },
     "class_type": "VHS_VideoCombine",
@@ -573,7 +577,7 @@
   },
   "147": {
     "inputs": {
-      "text": "65",
+      "text": "113",
       "anything": [
         "144",
         0
@@ -586,7 +590,7 @@
   },
   "148": {
     "inputs": {
-      "text": "65",
+      "text": "113",
       "anything": [
         "21",
         0

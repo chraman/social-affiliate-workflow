@@ -74,7 +74,7 @@ async function uploadFileToComfyUI(fileUrl, { prefix, defaultExt }) {
 // userPrompt      - optional override for the positive text prompt
 async function startImageToVideoUsingComfyUI(imageUrl, userPrompt) {
 
- let controlVideoUrl = "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788866572/igexport-db0o-6kt9be_eOV3ncvz_aaff6z.mp4"
+ let controlVideoUrl = "https://res.cloudinary.com/ds8bfxetq/video/upload/v1789015985/affiliate-pipeline/black-square-neck-flutter-sleeves-ruffled-detailed-maxi-dress/jefq7f8nn4zteqx02ipp_motion_189.mp4"
 
  // ek step aage ake mudhna
 //  "https://res.cloudinary.com/ds8bfxetq/video/upload/v1788850364/affiliate-pipeline/women-floral-printed-regular-pure-cotton-kurta-with-palazzos/r6emmdbzhy97gs1ikhwr_motion_151.mp4"
