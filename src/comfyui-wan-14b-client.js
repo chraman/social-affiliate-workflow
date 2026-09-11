@@ -12,7 +12,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const FormData = require('form-data');
-const workflowTemplate = require('./wan22-i2v-workflow-14b.json');
+const workflowTemplate = require('./wan22-i2v-workflow-14b-bent-down.json');
 
 const COMFYUI_BASE = process.env.COMFYUI_BASE_URL || 'http://127.0.0.1:8188';
 
@@ -68,10 +68,19 @@ async function startImageToVideoUsingComfyUI(imageUrl, userPrompt) {
 
   // Default prompt used when the caller doesn't pass one — coffee-sip
   // fashion-shot motion, matching what's baked into the exported JSON.
+  let facialConsistency = "Her face remain consistent with the reference image throughout the motions, preserving every detail and facial feature. The fine details of her eyes, eyelashes, lips, and eyebrows remain consistently sharp and realistic in every frame."
+  // fashion shot of 360 degree turn, have some noise in the final outpu
+  let fashionShotPrompt = "xz360, a full body shot of a woman turning around."
 
+  let hand2kissPrompt = "h4ndtokiss, Medium-full static shot, consistent soft ambient lighting. The woman moves a step forward and then moves one hand with the back of the hand towards the viewer."
+  let bentdownPrompt = "A woman walks toward the viewer. She pulls her hair back and holds it up with both hands."
+  let seductiveTurnsPrompt = "a woman is doing the turning pose, she is turning in a half circle until her back faces the camera, walks away a step, then turning fully back around to face the camera directly with a captivating smile, medium shot, cinematic lighting, smooth motion."
+  let leandownPrompt = "A girl, she is bending forward her breasts are bouncing and jiggling"
+  let lipbitePrompt = "A close-up shot of the woman looking directly at the camera, walking two steps forward towards the viewer, stopping smoothly, and she bites her lip, seductive expression, smooth motion, high detail."
+  
   const DEFAULT_PROMPT = userPrompt || "The woman stands centered in frame and performs one continuous, slow 360-degree turn to showcase the full outfit from every angle. The rotation is smooth and even-paced, completing in a single unbroken motion. Fabric shifts naturally with the turn — realistic drape, subtle sheen, gentle movement around the hem. Hair sways softly with the rotation. Camera remains static, medium-full shot, no zoom or pan. Lighting stays soft and consistent throughout. Motion is fluid and physically natural, no jerky or robotic movement."
 
-  workflow[NODE_IDS.positivePrompt].inputs.text =  DEFAULT_PROMPT;
+  workflow[NODE_IDS.positivePrompt].inputs.text =  bentdownPrompt + " " + facialConsistency;
   workflow[NODE_IDS.loadImage].inputs.image = uploadedFilename;
 
   // Randomize the seed each run — otherwise identical inputs can hit

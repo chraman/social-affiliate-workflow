@@ -169,7 +169,7 @@
   },
   "102": {
     "inputs": {
-      "lora_name": "HandToKiss_1000_highnoise.safetensors",
+      "lora_name": "lip_bite_highnoise.safetensors",
       "strength_model": 1,
       "model": [
         "67",
@@ -197,7 +197,7 @@
   },
   "101": {
     "inputs": {
-      "lora_name": "HandToKiss_1000_low_noise.safetensors",
+      "lora_name": "lip_bite_low_noise.safetensors",
       "strength_model": 1,
       "model": [
         "68",
@@ -255,7 +255,7 @@
     "inputs": {
       "width": 720,
       "height": 1280,
-      "length": 81,
+      "length": 73,
       "batch_size": 1,
       "positive": [
         "6",

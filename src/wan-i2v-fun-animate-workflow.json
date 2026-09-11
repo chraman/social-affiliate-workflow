@@ -135,7 +135,7 @@
     "inputs": {
       "detect_hand": "enable",
       "detect_body": "enable",
-      "detect_face": "disable",
+      "detect_face": "enable",
       "resolution": 704,
       "bbox_detector": "yolox_l.onnx",
       "pose_estimator": "dw-ll_ucoco_384.onnx",

@@ -65,7 +65,7 @@
     "inputs": {
       "shift": 5,
       "model": [
-        "67",
+        "102",
         0
       ]
     },
@@ -167,6 +167,20 @@
       "title": "Load LoRA"
     }
   },
+  "102": {
+    "inputs": {
+      "lora_name": "wan22-i2v-high-fashion-360.safetensors",
+      "strength_model": 1,
+      "model": [
+        "67",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA (Style - select per job)"
+    }
+  },
   "68": {
     "inputs": {
       "lora_name": "Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors",
@@ -205,18 +219,20 @@
   },
   "73": {
     "inputs": {
-      "unet_name": "Wan2.2-I2V-A14B-HighNoise-Q5_1.gguf"
+      "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
     },
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "_meta": {
       "title": "Unet Loader (GGUF)"
     }
   },
   "74": {
     "inputs": {
-      "unet_name": "Wan2.2-I2V-A14B-LowNoise-Q5_1.gguf"
+      "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
     },
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "UNETLoader",
     "_meta": {
       "title": "Unet Loader (GGUF)"
     }
@@ -225,7 +241,7 @@
     "inputs": {
       "width": 720,
       "height": 1280,
-      "length": 73,
+      "length": 96,
       "batch_size": 1,
       "positive": [
         "6",

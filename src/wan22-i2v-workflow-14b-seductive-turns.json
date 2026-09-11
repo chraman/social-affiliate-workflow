@@ -14,7 +14,7 @@
   },
   "7": {
     "inputs": {
-      "text": "an extra hand from behind the screen, 色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
       "clip": [
         "38",
         0
@@ -169,7 +169,7 @@
   },
   "102": {
     "inputs": {
-      "lora_name": "HandToKiss_1000_highnoise.safetensors",
+      "lora_name": "seductive_turns_highnoise.safetensors",
       "strength_model": 1,
       "model": [
         "67",
@@ -197,7 +197,7 @@
   },
   "101": {
     "inputs": {
-      "lora_name": "HandToKiss_1000_low_noise.safetensors",
+      "lora_name": "seductive_turns_low_noise.safetensors",
       "strength_model": 1,
       "model": [
         "68",
@@ -255,7 +255,7 @@
     "inputs": {
       "width": 720,
       "height": 1280,
-      "length": 81,
+      "length": 73,
       "batch_size": 1,
       "positive": [
         "6",
